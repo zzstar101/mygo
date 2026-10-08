@@ -154,6 +154,11 @@ type AppController interface {
 	// ClearBrowsingData deletes the data pages stored; done runs on the
 	// main thread.
 	ClearBrowsingData(done func(error))
+	// Cookie operations address the default page store. Calls and exactly-once
+	// completions run on main; ListCookies returns independent Go values.
+	ListCookies(done func([]Cookie, error))
+	SetCookie(cookie Cookie, done func(error))
+	DeleteCookie(key CookieKey, done func(error))
 	ShowAboutPanel(opts AboutPanelOptions)
 	Locale() string
 	// RegisterURLScheme makes the app, identified by id (its identifier)

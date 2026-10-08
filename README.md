@@ -21,6 +21,8 @@ memory and CPU use.
 - **Typed IPC** for pages: bind Go services, stream values through channels
   and send typed events; the TypeScript client is generated from your Go
   code.
+- **Go cookie management** for web pages: shared-store snapshots, HTTPOnly
+  cookies, exact-key updates and deletion, and cookie-only clearing.
 - **A Go UI toolkit** for native UI: flexbox and grid layout, widgets, text
   editing with input methods, virtualized lists, SVG icons, animations,
   screen reader support, and views you test without a window; Liquid Glass

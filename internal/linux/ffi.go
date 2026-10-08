@@ -818,12 +818,22 @@ func loadWebKit() error {
 	if libWebKit, err = open("libwebkit2gtk-4.1.so.0", "libwebkit2gtk-4.0.so.37"); err != nil {
 		return fmt.Errorf("%w (install WebKitGTK: libwebkit2gtk-4.1-0 on Debian/Ubuntu, webkit2gtk4.1 on Fedora)", err)
 	}
-	if libJSC, err = open("libjavascriptcoregtk-4.1.so.0", "libjavascriptcoregtk-4.0.so.18"); err != nil {
+	// 4.1 links libsoup 3 and 4.0 libsoup 2.4. Opening the loaded library
+	// again returns the same handle, which tells the two apart.
+	h41, _ := open("libwebkit2gtk-4.1.so.0")
+	soup3 = h41 != 0 && h41 == libWebKit
+	jsc, soup := "libjavascriptcoregtk-4.1.so.0", "libsoup-3.0.so.0"
+	if !soup3 {
+		jsc, soup = "libjavascriptcoregtk-4.0.so.18", "libsoup-2.4.so.1"
+	}
+	// SoupCookie pointers must never cross Soup ABI generations.
+	if libJSC, err = open(jsc); err != nil {
 		return err
 	}
-	if libSoup, err = open("libsoup-3.0.so.0", "libsoup-2.4.so.1"); err != nil {
+	if libSoup, err = open(soup); err != nil {
 		return err
 	}
+	bindCookies()
 
 	w := libWebKit
 	mustBind(w, &webkitWebContextGetDefault, "webkit_web_context_get_default")

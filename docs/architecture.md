@@ -57,6 +57,7 @@ framework safely. Read it before changing anything under `internal/`.
 ├── protocol.go         custom schemes served by http.Handler, FileServer
 ├── frontend.go         the app's frontend: relative URLs, devUrl, mygo://localhost
 ├── menu.go             Menu/MenuItem model, roles, native item updates
+├── cookies.go              Go-only shared webview cookie store; validation, exact keys, shutdown
 ├── dialog.go modules.go clipboard.go: shell, clipboard, screen, theme, tray, shortcuts, notifications
 ├── loop.go             main-thread queue: postMain / onMain / await
 ├── events.go           listener lists and the Preventable event types
@@ -3157,6 +3158,7 @@ which npm allows only for packages that exist: the first release uses an
 | window icon | ignored | `gtk_window_set_icon` | `WM_SETICON` at the window's DPI |
 | URL schemes | Info.plist (`urlSchemes`); `RegisterURLScheme` makes the app the default handler | desktop entry + `mimeapps.list` | `HKCU\Software\Classes` |
 | downloads | `shouldPerformDownload`, non-displayable or attachment responses → `WKDownload` delegate | `download-started` / `decide-destination` on the web context; response policy for attachments | `DownloadStarting` (`ICoreWebView2_4`), replacing WebView2's download UI |
+| Cookies | default `WKHTTPCookieStore` (10.15+ full fields) | default `WebKitCookieManager` (List 2.42+, Soup 2.70+/3 for SameSite; existing nonpersistent default), coupled WebKit/JSC/Soup ABI family | shared WebView2 `_2` cookie manager; needs a page window; expiration ABI thunk on arm64 |
 | ClearBrowsingData | default `WKWebsiteDataStore`, all types | the web context's website data manager | the WebView2 profile's `ClearBrowsingDataAll` (needs a window) |
 | permissions | `WKUIDelegate` media capture (camera, microphone) | `permission-request` (camera, microphone, geolocation, notifications) | `PermissionRequested` (the same four; WebView2 asks about others) |
 | file associations | `CFBundleDocumentTypes`; files arrive with `application:openURLs:` | desktop entry `MimeType` (`%U`), a shared-mime-info package in the .deb for types the app defines | ProgIDs and `OpenWithProgids` written by the installer |

@@ -76,6 +76,10 @@ func (app) OpenedAtLogin() bool                               { return false }
 func (app) SetDockMenu(*platform.Menu)                        {}
 func (app) ClearBrowsingData(done func(error))                { done(errUnsupported) }
 
+func (app) ListCookies(done func([]platform.Cookie, error))     { done(nil, platform.ErrUnsupported) }
+func (app) SetCookie(_ platform.Cookie, done func(error))       { done(platform.ErrUnsupported) }
+func (app) DeleteCookie(_ platform.CookieKey, done func(error)) { done(platform.ErrUnsupported) }
+
 type dialogs struct{}
 
 func (dialogs) ShowOpenDialog(_ platform.Window, _ *platform.OpenDialogOptions, cb func([]string, error)) {

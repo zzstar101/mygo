@@ -254,3 +254,58 @@ user's language, such as `"en-US"`.
 local and session storage, IndexedDB, service workers and caches, for
 example when the user signs out. Open pages keep what they hold in memory
 until they reload.
+
+### Cookies
+
+`mygo.Cookies` manages the existing default webview store shared by the app's
+pages, not a Go HTTP client jar or the system browser. It is Go-only: HTTPOnly
+and cross-origin cookies may contain credentials, so never bind this module
+wholesale to a page. Native UI windows do not provide a cookie store.
+
+```go
+err := mygo.Cookies.Set(mygo.Cookie{
+    Name: "session", Value: "encoded-token", Domain: "example.com",
+    Secure: true, HTTPOnly: true, SameSite: mygo.CookieSameSiteLax,
+})
+if err != nil { return err }
+cookies, err := mygo.Cookies.List() // includes HTTPOnly; sorted domain/path/name
+_ = cookies
+if err != nil { return err }
+return mygo.Cookies.Delete("session", "example.com", "/")
+```
+
+`Get(name, domain, path)` returns `(cookie, found, error)`. Get and Delete match
+exact keys, not request URLs: a leading-dot domain is distinct, domain case is
+normalized, and an empty path means `/`. Prefer keys returned by List. Duplicate
+indistinguishable native entries are ambiguous; partition metadata is not
+represented, so this is not a complete browser backup/restore API.
+
+Set accepts ASCII HTTP-token names and cookie-octet values; encode arbitrary
+payloads. Use ASCII/punycode domains without ports or trailing dots. Empty
+SameSite becomes Lax; None requires Secure. `__Secure-` and `__Host-` restrictions
+are checked. Zero Expires means a session cookie; other dates use UTC whole
+seconds and a past date deletes the exact key. Expires is metadata, not a promise
+of persistence or a disk flush: the engine can reject, clamp, or evict cookies.
+
+`Cookies.Clear()` deletes a snapshot of cookies only and preserves localStorage,
+IndexedDB and caches. It attempts every deletion and joins errors; partial
+success is possible. Pages can create cookies concurrently, so neither Clear nor
+broad `App.ClearBrowsingData()` is an authentication transaction.
+
+Methods are safe from any goroutine once the app is running, including listeners
+on main (which pump the event loop reentrantly while waiting). Main-thread calls
+before Run panic. Shutdown wakes pending callers with an error; accepted native
+mutations cannot be rolled back. Concurrent calls have no promised ordering.
+
+- macOS requires 10.15+ for full cookie fields, detected at runtime.
+- Linux uses the unchanged default WebKit context, which does **not** configure
+  persistent cookie storage. List/Get/Clear need WebKitGTK 2.42+; mutations need
+  2.20+, and Set needs Soup 2.70+ or 3 for SameSite. Missing optional APIs report
+  capability errors without preventing ordinary app startup. An older Soup may
+  report unknown SameSite on reads.
+- Windows needs an open web-page window; initialization is awaited. The runtime
+  must support `ICoreWebView2_2` (introduced with SDK 1.0.705.50). No hidden window
+  is created. The store remains shared if the selected window changes.
+
+Store identity and persistence follow the existing backend configuration; this
+API does not add profiles, partitions, or new isolation guarantees.
