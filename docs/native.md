@@ -240,6 +240,29 @@ while Linux and Windows let them read. Linux needs libsecret (the
 `libsecret-1-0` package on Debian and Ubuntu) and a running Secret
 Service; without them the methods return an error.
 
+## File watching
+
+Watch existing directories directly from Go, without registering a plugin.
+Start after `App.Run` initializes the app; prefer a goroutine for long waits:
+
+```go
+go func() {
+    w, err := mygo.WatchFiles(ctx, directory, mygo.FileWatchOptions{Recursive: true})
+    if err != nil { log.Print(err); return }
+    defer w.Close()
+    for {
+        event, err := w.Next(ctx)
+        if err != nil { return }
+        log.Print(event.Op, " ", event.Path)
+    }
+}()
+```
+
+Events are root-relative invalidation hints, not a complete journal. `Close`
+is nonblocking; `Done` reports released resources. Overflow requires re-reading
+state and opening a new watch. See [Watch](plugins/watch.md) for coalescing,
+limits, platform differences, and optional page access through root aliases.
+
 ## Global shortcuts
 
 Global shortcuts work while the app is in the background, for example to

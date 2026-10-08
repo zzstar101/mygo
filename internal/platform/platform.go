@@ -88,6 +88,10 @@ type Backend interface {
 	// Secrets may be called before Init, from any goroutine.
 	Secrets() Secrets
 
+	// NewFileWatch creates an asynchronous native hint source. post schedules
+	// callbacks on main and returns false after application shutdown.
+	NewFileWatch(post func(func()) bool, notify func(FileWatchNotice)) (FileWatch, error)
+
 	NewTray(h TrayHandler) (Tray, error)
 	RegisterHotkey(id int, accelerator string) error
 	UnregisterHotkey(id int)

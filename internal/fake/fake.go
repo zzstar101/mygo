@@ -44,8 +44,12 @@ type Backend struct {
 	prefs                platform.Preferences
 	// Watching reports whether power events were asked for, Awake counts the
 	// KeepAwake calls not released yet.
-	Watching bool
-	Awake    int
+	// FileWatches records native watch instances; inspect on main.
+	FileWatches []*FileWatch
+	// FileWatchError injects a factory failure.
+	FileWatchError error
+	Watching       bool
+	Awake          int
 	// URLSchemes are the registered URL schemes, by scheme: "id name".
 	URLSchemes map[string]string
 	// LoginItem is the command that starts the app at login: "id name arg".

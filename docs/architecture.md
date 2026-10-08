@@ -96,7 +96,7 @@ framework safely. Read it before changing anything under `internal/`.
 │                       per-platform binary packages
 ├── plugins/            official plugins, each a Go package and its npm
 │                       package (@mygo-plugins/<name>) side by side: fetch,
-│                       websocket, sqlite; and Go only: updater, the update window,
+│                       websocket, sqlite, watch; and Go only: updater, the update window,
 │                       a web page or native UI (updater/native),
 │                       terminal, a view of native UI running programs with
 │                       libghostty-vt, glass, and game, what games need
@@ -192,6 +192,20 @@ rules are:
 Main-thread-only fields are marked as such in comments (for example
 `Window.native`, `Window.trusted`). Fields shared with other goroutines are
 guarded by a mutex or atomic.
+
+### Filesystem watch workers
+
+`watch.go` and `watch_scan.go` own validation, anchored `os.Root` snapshots,
+recursion, identity-based rename pairing, bounded delivery and debounce policy.
+`internal/platform.FileWatch` only enrolls targets and reports native hints.
+`internal/watchdriver` uses bounded command/mailboxes and at most one posted
+main-thread drain per watcher; no new native callbacks are allocated. Add
+acknowledgments and notices run on main. Native owner workers perform I/O;
+Close requests cancellation without waiting, and completion never needs a UI
+callback. Accepted application shutdown closes watches before `OnQuit`.
+The official `plugins/watch` adapter adds deny-by-default aliases, page-generation
+quotas and channel-owned streams; Go/native UI callers use the core directly.
+See [Watch](plugins/watch.md) for its app-controlled-root security boundary.
 
 ## Native interop without cgo
 
@@ -842,6 +856,13 @@ with an error naming `mygo.Use`. The official plugins in `plugins/` keep
 each Go package next to its npm package, built into `dist/` by `bun run
 build` like mygo-runtime and released with the same version.
 
+- **watch** exposes app-configured directory aliases over a page-owned channel.
+  Setup validates copied root configuration without a GUI; an optional Allow
+  callback only narrows grants. Page-generation identity in `internal/callcontext`
+  separates navigation quotas. The method owns the core watcher until native
+  cleanup completes; failure monitoring unblocks sends stalled by flow control.
+  No filename broadcasts, native asset manifest, or bridge protocol changes
+  are involved. The TypeScript iterator consumes bounded batches lazily.
 - **fetch** streams a response through a `Channel`: the head first (status,
   headers, final URL), then base64 chunks of the body as Go reads them. The
   JavaScript side builds a `Response` around a pull-based `ReadableStream`
@@ -3144,6 +3165,7 @@ which npm allows only for packages that exist: the first release uses an
 
 | feature | macOS | Linux | Windows |
 |---|---|---|---|
+| filesystem watching | kqueue vnode hints, core snapshots, fd per file/directory | inotify, core recursive directory enrollment | overlapped ReadDirectoryChangesW, core directory enrollment and private root sentinel |
 | menu bar | application menu bar, default menu installed | per-window GTK menu bar, none by default | per-window Win32 menu bar, none by default |
 | auto-hide menu bar | ignored | the bar widget hides; `can-activate-accel` keeps its shortcuts; Alt alone or F10 show it and open its first menu until it deactivates | the menu is attached only for the `SC_KEYMENU` menu loop that Alt alone or F10 start; shortcuts come from the webview |
 | tray | NSStatusItem, click events | AppIndicator (menu only, no click events) | notification area icon, click events |

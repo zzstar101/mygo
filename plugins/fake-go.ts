@@ -16,7 +16,7 @@ export interface GoCall {
 export type Handler = (call: GoCall) => unknown;
 
 /** Methods whose argument 1 is a channel, as those of the plugins. */
-const streaming = new Set(["plugin:fetch.Fetch", "plugin:websocket.Connect"]);
+const streaming = new Set(["plugin:fetch.Fetch", "plugin:websocket.Connect", "plugin:watch.Watch"]);
 
 /** Installs window.mygo with handlers for methods; returns what was called. */
 export function fakeGo(handlers: Record<string, Handler>): { calls: [string, unknown[]][]; uninstall(): void } {

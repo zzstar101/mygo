@@ -118,6 +118,9 @@ components, from buttons to tables.
 
 ## Official plugins
 
+- [Watch](plugins/watch.md): filesystem watches for Go/native UI and
+  app-authorized page streams.
+
 - [Fetch](plugins/fetch.md): a `fetch` that makes HTTP requests from Go,
   with no CORS, any header, streamed bodies and cancellation.
 - [WebSocket](plugins/websocket.md): a `WebSocket` whose connections Go
