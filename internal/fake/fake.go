@@ -54,6 +54,13 @@ type Backend struct {
 	DockMenu *platform.Menu
 	// Cleared counts ClearBrowsingData calls.
 	Cleared int
+	// RecentDocuments are the paths AddRecentDocument recorded, in order,
+	// without the ones ClearRecentDocuments removed.
+	RecentDocuments []string
+	// RecentCleared counts ClearRecentDocuments calls.
+	RecentCleared int
+	// JumpListTasks are the tasks of the last SetJumpList call.
+	JumpListTasks []platform.JumpListTask
 	// Dialog results returned by the next dialog.
 	OpenResult    []string
 	SaveResult    string
@@ -654,6 +661,28 @@ func (a app) IsURLSchemeRegistered(scheme, id, name string) bool {
 	a.b.mu.Lock()
 	defer a.b.mu.Unlock()
 	return a.b.URLSchemes[scheme] == id+" "+name
+}
+
+func (a app) AddRecentDocument(path string) error {
+	a.b.mu.Lock()
+	defer a.b.mu.Unlock()
+	a.b.RecentDocuments = append(a.b.RecentDocuments, path)
+	return nil
+}
+
+func (a app) ClearRecentDocuments() error {
+	a.b.mu.Lock()
+	defer a.b.mu.Unlock()
+	a.b.RecentDocuments = nil
+	a.b.RecentCleared++
+	return nil
+}
+
+func (a app) SetJumpList(tasks []platform.JumpListTask) error {
+	a.b.mu.Lock()
+	defer a.b.mu.Unlock()
+	a.b.JumpListTasks = append([]platform.JumpListTask(nil), tasks...)
+	return nil
 }
 
 type dialogs struct{ b *Backend }

@@ -3160,6 +3160,8 @@ which npm allows only for packages that exist: the first release uses an
 | ClearBrowsingData | default `WKWebsiteDataStore`, all types | the web context's website data manager | the WebView2 profile's `ClearBrowsingDataAll` (needs a window) |
 | permissions | `WKUIDelegate` media capture (camera, microphone) | `permission-request` (camera, microphone, geolocation, notifications) | `PermissionRequested` (the same four; WebView2 asks about others) |
 | file associations | `CFBundleDocumentTypes`; files arrive with `application:openURLs:` | desktop entry `MimeType` (`%U`), a shared-mime-info package in the .deb for types the app defines | ProgIDs and `OpenWithProgids` written by the installer |
+| recent documents | `noteNewRecentDocumentURL:` / `clearRecentDocuments:` on the shared document controller (Open Recent and Dock menus) | `gtk_recent_manager_add_item` / `remove_item` in the per-user `recently-used.xbel` | `SHAddToRecentDocs` (`SHARD_PATHW`), the jump list's Recent category; the AppUserModelID is set at startup |
+| jump list tasks | ignored | ignored | `ICustomDestinationList` `AddUserTasks` + `CommitList`, the Tasks category; `IShellLinkW` per task, `PKEY_Title` from an `IPropertyStore` |
 | Dock menu | `applicationDockMenu:` | ignored | ignored |
 | PrintToPDF | `printOperationWithPrintInfo:` save job (`NSJobSavingURL`), fit to width | `WebKitPrintOperation` to GTK's "Print to File" | DevTools `Page.printToPDF` |
 | power events | NSWorkspace sleep/wake, `com.apple.screenIsLocked` distributed notifications | logind `PrepareForSleep` (system bus), screen saver `ActiveChanged` (GNOME, freedesktop) | `WM_POWERBROADCAST`, `WM_WTSSESSION_CHANGE` |

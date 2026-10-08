@@ -79,10 +79,10 @@ that must start instantly.
   develop and build an app, with native UI or a web frontend.
 - [Windows](windows.md): creating and arranging windows of both kinds,
   their events, and what windows showing web pages do with them:
-  navigation, downloads, permissions, printing.
+  navigation, downloads, permissions, printing, and the jump list.
 - [The application](app.md): the lifecycle, quitting, a single instance,
-  deep links, file associations, starting at login and well-known
-  directories.
+  deep links, file associations, recent documents, starting at login and
+  well-known directories.
 - [Menus and the tray](menus.md): application, context and Dock menus,
   keyboard shortcuts and tray icons.
 - [Desktop APIs](native.md): dialogs, notifications, the clipboard, the

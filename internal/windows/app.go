@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -55,6 +56,10 @@ type Backend struct {
 	badge       string
 	hidden      []*window
 	icon        uintptr // default window icon (SetDockIcon)
+	// appUserModelID names the app to the shell, which ties its jump list
+	// and recent documents together (jumplist.go); Init sets it before any
+	// window and any recent-document or jump-list call.
+	appUserModelID string
 
 	// captions are the windows of the controls of windows with a hidden
 	// title bar (titlebar.go), captionFonts their glyphs by DPI.
@@ -100,6 +105,21 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	b.name = opts.Name
 	theBackend = b
 	procCoInitializeEx.Call(0, coinitApartmentThreaded)
+	// Name the app to the shell before any window, any SHAddToRecentDocs
+	// call and any jump-list commit. The package identifier is preferred,
+	// since the version resource carries it (Package); the app's name is
+	// the fallback. A failure is not fatal: the shell then derives an ID
+	// from the executable path, and recent documents still work.
+	b.appUserModelID = opts.Name
+	if info, ok := b.App().Package(); ok && info.Identifier != "" {
+		b.appUserModelID = info.Identifier
+	}
+	b.appUserModelID = strings.ReplaceAll(b.appUserModelID, " ", ".")
+	// At most 128 characters, cut at a rune boundary.
+	if r := []rune(b.appUserModelID); len(r) > 128 {
+		b.appUserModelID = string(r[:128])
+	}
+	procSetCurrentProcessExplicitAppUserModelID.Call(uintptr(unsafe.Pointer(u16(b.appUserModelID))))
 	if has(procSetProcessDpiAwarenessContext) {
 		procSetProcessDpiAwarenessContext.Call(dpiAwarenessContextPerMonitorAwareV2)
 	}
@@ -576,4 +596,21 @@ func (a appController) ClearBrowsingData(done func(error)) {
 	if failed(hr) {
 		done(hresultError("clearing browsing data", hr))
 	}
+}
+
+// AddRecentDocument tells the shell the app opened path, so it lists the
+// file in the Recent category of the app's jump list. SHARD_PATHW: path
+// is a NUL-terminated wide string; the shell coalesces duplicates and
+// reorders by recency. Nothing is allocated or freed.
+func (a appController) AddRecentDocument(path string) error {
+	procSHAddToRecentDocs.Call(uintptr(shardPathW), uintptr(unsafe.Pointer(u16(path))))
+	return nil
+}
+
+// ClearRecentDocuments clears the usage data the shell tracks for the app,
+// which also empties the Recent category of its jump list.
+func (a appController) ClearRecentDocuments() error {
+	// "Set this parameter to NULL to clear all usage data on all items."
+	procSHAddToRecentDocs.Call(0, 0)
+	return nil
 }

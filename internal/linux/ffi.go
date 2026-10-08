@@ -455,6 +455,15 @@ var (
 	gtkPageSetupSetRightMargin                        func(setup ptr, margin float64, unit int32)
 	gtkPaperSizeNewCustom                             func(name, displayName *byte, width, height float64, unit int32) ptr
 	gtkPaperSizeFree                                  func(size ptr)
+	gtkRecentManagerGetDefault                        func() ptr
+	gtkRecentManagerAddItem                           func(manager ptr, uri *byte) bool
+	gtkRecentManagerGetItems                          func(manager ptr) ptr
+	gtkRecentInfoGetURI                               func(info ptr) ptr
+	gtkRecentInfoHasApplication                       func(info, app ptr) bool
+	gtkRecentInfoUnref                                func(info ptr)
+	gGetApplicationName                               func() ptr
+	gtkRecentManagerRemoveItem                        func(manager ptr, uri *byte, gerr ptr) bool
+	gtkRecentManagerHasItem                           func(manager ptr, uri *byte) bool
 	webkitJavascriptResultGetJSValue                  func(r ptr) ptr
 	webkitNavigationPolicyDecisionGetNavigationAction func(d ptr) ptr
 	webkitNavigationPolicyDecisionGetFrameName        func(d ptr) ptr
@@ -540,6 +549,7 @@ func load() error {
 	mustBind(g, &gMainLoopUnref, "g_main_loop_unref")
 	mustBind(g, &gSlistFree, "g_slist_free")
 	mustBind(g, &gListFree, "g_list_free")
+	mustBind(g, &gGetApplicationName, "g_get_application_name")
 	mustBind(g, &gVariantNewString, "g_variant_new_string")
 	mustBind(g, &gVariantNewUint32, "g_variant_new_uint32")
 	mustBind(g, &gVariantNewInt32, "g_variant_new_int32")
@@ -783,6 +793,14 @@ func load() error {
 	mustBind(t, &gtkPageSetupSetRightMargin, "gtk_page_setup_set_right_margin")
 	mustBind(t, &gtkPaperSizeNewCustom, "gtk_paper_size_new_custom")
 	mustBind(t, &gtkPaperSizeFree, "gtk_paper_size_free")
+	mustBind(t, &gtkRecentManagerGetDefault, "gtk_recent_manager_get_default")
+	mustBind(t, &gtkRecentManagerAddItem, "gtk_recent_manager_add_item")
+	mustBind(t, &gtkRecentManagerGetItems, "gtk_recent_manager_get_items")
+	mustBind(t, &gtkRecentInfoGetURI, "gtk_recent_info_get_uri")
+	mustBind(t, &gtkRecentInfoHasApplication, "gtk_recent_info_has_application")
+	mustBind(t, &gtkRecentInfoUnref, "gtk_recent_info_unref")
+	mustBind(t, &gtkRecentManagerRemoveItem, "gtk_recent_manager_remove_item")
+	mustBind(t, &gtkRecentManagerHasItem, "gtk_recent_manager_has_item")
 	mustBind(libCairo, &cairoSurfaceWriteToPNGStream, "cairo_surface_write_to_png_stream")
 	mustBind(libCairo, &cairoSurfaceDestroy, "cairo_surface_destroy")
 

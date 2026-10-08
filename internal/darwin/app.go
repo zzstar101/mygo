@@ -470,3 +470,28 @@ func (a appController) ClearBrowsingData(done func(error)) {
 		blk.Release()
 	})
 }
+
+func (a appController) AddRecentDocument(path string) error {
+	var err error
+	withPool(func() {
+		dc := send(class("NSDocumentController"), "sharedDocumentController")
+		if dc == 0 {
+			err = errNoDocumentController
+			return
+		}
+		send(dc, "noteNewRecentDocumentURL:", uintptr(fileURL(path)))
+	})
+	return err
+}
+
+func (a appController) ClearRecentDocuments() error {
+	withPool(func() {
+		dc := send(class("NSDocumentController"), "sharedDocumentController")
+		if dc != 0 {
+			send(dc, "clearRecentDocuments:", 0)
+		}
+	})
+	return nil
+}
+
+func (appController) SetJumpList([]platform.JumpListTask) error { return nil }

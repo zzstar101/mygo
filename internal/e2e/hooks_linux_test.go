@@ -70,6 +70,16 @@ func defaultURLHandler(scheme string) (id string, supported bool) {
 
 func dockMenu(int) ([]string, bool) { return nil, false }
 
+// recentDocumentsSupported: Linux keeps recent documents in GtkRecentManager.
+func recentDocumentsSupported() bool { return true }
+
+// recentDocumentRecorded reports whether the app recorded path as a recent
+// document. Linux stores the entry in the per-user recently-used.xbel, which
+// TestRecentDocuments redirects to a temporary XDG_DATA_HOME.
+func recentDocumentRecorded(path string) (recorded, supported bool) {
+	return linux.TestHasRecentItem(path), true
+}
+
 // pressCtrlShiftK presses Ctrl+Shift+K like a keyboard.
 func pressCtrlShiftK() (ok bool) {
 	mygo.RunOnMain(func() { ok = linux.TestPressKeys("Control_L", "Shift_L", "k") })

@@ -75,6 +75,9 @@ func (app) OpenAtLogin(string, string, string) bool           { return false }
 func (app) OpenedAtLogin() bool                               { return false }
 func (app) SetDockMenu(*platform.Menu)                        {}
 func (app) ClearBrowsingData(done func(error))                { done(errUnsupported) }
+func (app) AddRecentDocument(string) error                    { return errUnsupported }
+func (app) ClearRecentDocuments() error                       { return errUnsupported }
+func (app) SetJumpList([]platform.JumpListTask) error         { return errUnsupported }
 
 type dialogs struct{}
 

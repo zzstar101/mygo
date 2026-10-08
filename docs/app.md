@@ -176,6 +176,43 @@ It also gets files dropped on the app's Dock icon (macOS) and files passed
 on the command line. As with deep links, the single instance lock makes the
 first instance get the files of later ones on Windows and Linux.
 
+## Recent documents
+
+Record the documents the user opens so the system lists them where it keeps
+recent files, and the user can open them again from there:
+
+```go
+if err := mygo.App.AddRecentDocument(path); err != nil {
+	log.Println(err)
+}
+```
+
+`AddRecentDocument` makes the path absolute and records it in the Open Recent
+menu on macOS, in the app's own entries of the shared recent files list on
+Linux (`~/.local/share/recently-used.xbel`), and in the Recent category of the
+app's jump list on Windows (see [jump lists](windows.md#jump-lists)). That
+list is per user and shared with other apps, so record only what the user
+opened. On macOS the entries also show in the Dock menu, unless the app sets
+its own with `App.Dock.SetMenu`.
+
+Choosing an entry opens the file again: its path arrives through
+`OnOpenFile`, like a file dropped on the Dock icon or passed on the command
+line.
+
+`ClearRecentDocuments` removes the entries the app added: it empties the Open
+Recent menu on macOS, drops the entries recorded under the app's name, from
+this run or earlier ones, and leaves the others on Linux, and clears the
+app's recent usage on Windows.
+
+```go
+if err := mygo.App.ClearRecentDocuments(); err != nil {
+	log.Println(err)
+}
+```
+
+There is no way to read the list back: the system owns it, and the app only
+adds to and clears its own entries.
+
 ## Start at login
 
 ```go

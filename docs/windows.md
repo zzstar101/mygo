@@ -529,6 +529,38 @@ of a page control its inspector, when it has one, see
   web view in a window of native UI ([Web view](ui/web-view.md)).
 - `mygo.App.OnWindowCreated` is called for every new window.
 
+## Jump lists
+
+Right-clicking the app's button on the taskbar shows its jump list. It has
+two categories: **Tasks**, quick actions the app sets, and **Recent**, the
+documents the user opened.
+
+`App.SetJumpList` sets the Tasks category, like the "New note" entry of a
+text editor:
+
+```go
+if err := mygo.App.SetJumpList([]mygo.JumpListTask{
+	{Title: "New note", Args: "--new"},
+	{Title: "Open in safe mode", Path: "/path/to/tool.exe", Args: "--safe", IconPath: "/path/to/icon.ico", IconIndex: 0},
+}); err != nil {
+	log.Println(err)
+}
+```
+
+Each task needs a `Title`. `Path` is the program to run, the app's own
+executable by default; `Args` are its arguments, and `IconPath` with
+`IconIndex` pick the icon, the program's own by default. Pass an empty list
+or `nil` to remove the tasks. `SetJumpList` does nothing on macOS and Linux,
+which have no jump list.
+
+The Recent category is filled by the system from `App.AddRecentDocument`
+(see [recent documents](app.md#recent-documents)); for its items to appear
+the app must declare the file types it opens (see
+[file associations](app.md#file-associations)) and be installed, since a
+program run with `go run` has no registered file types. MyGo gives the app
+an AppUserModelID at startup, from its package identifier or its name, which
+the shell attributes the jump list and the recent documents to.
+
 ## Native access
 
 `win.NativeHandle()` returns the native window, an `NSWindow*` on macOS, a

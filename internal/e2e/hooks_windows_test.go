@@ -20,6 +20,12 @@ func pressShortcut(string, bool) (bool, bool) { return false, false }
 
 func endSheet(*mygo.Window) (bool, bool) { return false, false }
 
+// Recording a recent document through SHAddToRecentDocs is not observable
+// from the app side, so it is covered on macOS and Linux only.
+func recentDocumentsSupported() bool { return false }
+
+func recentDocumentRecorded(string) (recorded, supported bool) { return false, false }
+
 // Clicks reach windows showing native UI only: WebView2 takes the mouse in
 // windows of its own process.
 func click(w *mygo.Window, x, y float64) (ok bool) {
