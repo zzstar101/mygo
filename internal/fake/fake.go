@@ -64,6 +64,10 @@ type Backend struct {
 	// notifications are the notifications shown and not yet removed, by
 	// id.
 	notifications map[string]*platform.Notification
+	// secretError, when set, is what every Secrets call fails with.
+	secretError error
+	// secrets holds the stored secrets by service and account.
+	secrets map[[2]string][]byte
 }
 
 // New creates a fake backend.
@@ -237,10 +241,11 @@ func (b *Backend) Dialogs() platform.Dialogs   { return dialogs{b} }
 func (b *Backend) Clipboard() platform.Clipboard {
 	return clipboard{b}
 }
-func (b *Backend) Shell() platform.Shell   { return shell{} }
-func (b *Backend) Screen() platform.Screen { return screen{} }
-func (b *Backend) Theme() platform.Theme   { return theme{b} }
-func (b *Backend) Power() platform.Power   { return power{b} }
+func (b *Backend) Shell() platform.Shell     { return shell{} }
+func (b *Backend) Screen() platform.Screen   { return screen{} }
+func (b *Backend) Theme() platform.Theme     { return theme{b} }
+func (b *Backend) Power() platform.Power     { return power{b} }
+func (b *Backend) Secrets() platform.Secrets { return secrets{b} }
 
 func (b *Backend) NewTray(platform.TrayHandler) (platform.Tray, error) { return &tray{}, nil }
 
@@ -989,4 +994,61 @@ func (s *Surface) Accessibility() (*platform.AccessTree, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.access, s.accessN
+}
+
+// secrets keeps secrets in memory. Like the real stores it may be called
+// from any goroutine.
+type secrets struct{ b *Backend }
+
+func (s secrets) SetSecret(service, account string, secret []byte) error {
+	s.b.mu.Lock()
+	defer s.b.mu.Unlock()
+	if s.b.secretError != nil {
+		return s.b.secretError
+	}
+	if s.b.secrets == nil {
+		s.b.secrets = map[[2]string][]byte{}
+	}
+	s.b.secrets[[2]string{service, account}] = bytes.Clone(secret)
+	return nil
+}
+
+func (s secrets) Secret(service, account string) ([]byte, error) {
+	s.b.mu.Lock()
+	defer s.b.mu.Unlock()
+	if s.b.secretError != nil {
+		return nil, s.b.secretError
+	}
+	v, ok := s.b.secrets[[2]string{service, account}]
+	if !ok {
+		return nil, platform.ErrSecretNotFound
+	}
+	return bytes.Clone(v), nil
+}
+
+func (s secrets) DeleteSecret(service, account string) error {
+	s.b.mu.Lock()
+	defer s.b.mu.Unlock()
+	if s.b.secretError != nil {
+		return s.b.secretError
+	}
+	delete(s.b.secrets, [2]string{service, account})
+	return nil
+}
+
+// StoredSecret returns the secret stored for service and account, as the
+// system's store would show it.
+func (b *Backend) StoredSecret(service, account string) ([]byte, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	v, ok := b.secrets[[2]string{service, account}]
+	return bytes.Clone(v), ok
+}
+
+// SetSecretError makes every Secrets call fail with err, or work again
+// when err is nil. It may be called from any goroutine.
+func (b *Backend) SetSecretError(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.secretError = err
 }

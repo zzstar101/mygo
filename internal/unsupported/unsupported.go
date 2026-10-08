@@ -40,6 +40,7 @@ func (*Backend) Shell() platform.Shell                                      { re
 func (*Backend) Screen() platform.Screen                                    { return screen{} }
 func (*Backend) Theme() platform.Theme                                      { return theme{} }
 func (*Backend) Power() platform.Power                                      { return power{} }
+func (*Backend) Secrets() platform.Secrets                                  { return secrets{} }
 func (*Backend) NewTray(platform.TrayHandler) (platform.Tray, error)        { return nil, errUnsupported }
 func (*Backend) RegisterHotkey(int, string) error                           { return errUnsupported }
 func (*Backend) UnregisterHotkey(int)                                       {}
@@ -136,3 +137,9 @@ func (power) Watch()                        {}
 func (power) KeepAwake(bool, string) func() { return func() {} }
 func (power) OnBattery() bool               { return false }
 func (power) IdleTime() time.Duration       { return 0 }
+
+type secrets struct{}
+
+func (secrets) SetSecret(string, string, []byte) error { return platform.ErrUnsupported }
+func (secrets) Secret(string, string) ([]byte, error)  { return nil, platform.ErrUnsupported }
+func (secrets) DeleteSecret(string, string) error      { return platform.ErrUnsupported }

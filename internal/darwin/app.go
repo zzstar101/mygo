@@ -208,6 +208,7 @@ func (b *Backend) Shell() platform.Shell         { return shell{} }
 func (b *Backend) Screen() platform.Screen       { return screen{} }
 func (b *Backend) Theme() platform.Theme         { return theme{b} }
 func (b *Backend) Power() platform.Power         { return power{b} }
+func (b *Backend) Secrets() platform.Secrets     { return secrets{} }
 
 var classesOnce bool
 
