@@ -225,21 +225,97 @@ const (
 	ThemeDark   ThemeSource = "dark"
 )
 
+// ThemePreferences are the accent color and the accessibility settings of
+// the desktop, which an app and its pages should follow.
+type ThemePreferences struct {
+	// Accent is the color of the desktop's controls, or a Color with A 0
+	// where the desktop has none.
+	Accent Color
+	// ReduceMotion reports that the desktop asks for less animation.
+	ReduceMotion bool
+	// HighContrast reports that the desktop uses a contrast theme.
+	HighContrast bool
+	// TextScale is the factor the desktop asks text to grow by; 1 is usual.
+	TextScale float64
+}
+
 // ThemeModule reads and overrides the light/dark appearance.
 type ThemeModule struct {
 	mu        sync.Mutex
 	source    ThemeSource
+	prefs     ThemePreferences
+	prefsOK   bool
 	onUpdated listeners[func()]
 }
 
 // Theme is the system appearance. Pages follow it through the
-// prefers-color-scheme media query.
+// prefers-color-scheme media query, and the accent color and accessibility
+// settings through the --mygo-accent and --mygo-text-scale CSS variables
+// and the mygo:preferences event.
 var Theme = &ThemeModule{}
 
 // IsDark reports whether the app currently uses a dark appearance.
 func (t *ThemeModule) IsDark() bool {
 	needsApp("Theme.IsDark")
 	return onMainValue(func() bool { return backend().Theme().IsDark() })
+}
+
+// Preferences returns the accent color and the accessibility settings of
+// the desktop. It is safe from any goroutine.
+func (t *ThemeModule) Preferences() ThemePreferences {
+	needsApp("Theme.Preferences")
+	prefs := onMainValue(t.preferences)
+	// A call made before App.Run from another goroutine is dropped by onMain
+	// and answers the zero value; 0 is not a text scale.
+	if prefs.TextScale <= 0 {
+		prefs.TextScale = 1
+	}
+	return prefs
+}
+
+// AccentColor returns the color of the desktop's controls, or a Color with
+// A 0 where the desktop has none. It is safe from any goroutine.
+func (t *ThemeModule) AccentColor() Color { return t.Preferences().Accent }
+
+// ReduceMotion reports whether the desktop asks for less animation. It is
+// safe from any goroutine.
+func (t *ThemeModule) ReduceMotion() bool { return t.Preferences().ReduceMotion }
+
+// HighContrast reports whether the desktop uses a contrast theme. It is
+// safe from any goroutine.
+func (t *ThemeModule) HighContrast() bool { return t.Preferences().HighContrast }
+
+// TextScale returns the factor the desktop asks text to grow by; 1 is the
+// usual size, and the value macOS reports, which has no text scale. It is
+// safe from any goroutine.
+func (t *ThemeModule) TextScale() float64 { return t.Preferences().TextScale }
+
+// preferences returns the desktop's preferences, read once per change. The
+// read can call out to the desktop (the settings portal on Linux), so it is
+// kept until the next change, as package ui keeps it. Main thread only.
+func (t *ThemeModule) preferences() ThemePreferences {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.prefsOK {
+		t.prefs = themePreferences(backend().Theme().Preferences())
+		t.prefsOK = true
+	}
+	return t.prefs
+}
+
+// themePreferences is the public view of a backend's preferences. Policy
+// lives here, not in the backends.
+func themePreferences(p platform.Preferences) ThemePreferences {
+	prefs := ThemePreferences{
+		Accent:       Color{R: p.Accent.R, G: p.Accent.G, B: p.Accent.B, A: p.Accent.A},
+		ReduceMotion: p.ReduceMotion,
+		HighContrast: p.HighContrast,
+		TextScale:    p.TextScale,
+	}
+	if prefs.TextScale <= 0 {
+		prefs.TextScale = 1 // the usual size, as package ui normalizes it
+	}
+	return prefs
 }
 
 // Source returns the appearance override.
@@ -288,7 +364,14 @@ func (t *ThemeModule) apply() {
 // OnUpdated is called when the effective appearance changes.
 func (t *ThemeModule) OnUpdated(fn func()) (off func()) { return t.onUpdated.add(fn, false) }
 
-func (t *ThemeModule) changed() { fire(&t.onUpdated) }
+// changed forgets the preferences read before and tells the listeners that
+// the system appearance changed. Main thread only.
+func (t *ThemeModule) changed() {
+	t.mu.Lock()
+	t.prefs, t.prefsOK = ThemePreferences{}, false
+	t.mu.Unlock()
+	fire(&t.onUpdated)
+}
 
 // GlobalShortcutModule registers system wide keyboard shortcuts.
 type GlobalShortcutModule struct {

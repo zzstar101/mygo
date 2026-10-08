@@ -181,6 +181,35 @@ mygo.Theme.SetSource(mygo.ThemeDark) // or ThemeLight, or ThemeSystem to follow 
 `SetSource` may be called before `App.Run`, for example with an appearance
 the user saved in the app's preferences: the app then starts in it.
 
+## Accent color and accessibility
+
+`mygo.Theme.Preferences()` returns the accent color of the desktop's own
+controls and the accessibility settings they follow:
+
+```go
+p := mygo.Theme.Preferences()
+p.Accent       // mygo.Color{R, G, B, A}, A 0 where the desktop has none
+p.ReduceMotion // the desktop asks for less animation
+p.HighContrast // the desktop uses a contrast theme
+p.TextScale    // the factor text grows by; 1 is the usual size
+
+if c := mygo.Theme.AccentColor(); c.A != 0 {
+	log.Println("accent:", c) // "#ff8000", or "#ff800080" when it has an alpha
+}
+```
+
+`AccentColor`, `ReduceMotion`, `HighContrast` and `TextScale` answer the same
+settings one at a time, and `mygo.Color.String()` is the color as CSS writes
+it. `Theme.OnUpdated` fires when the desktop changes any of them, as
+`SetSource` does. Reading them can call out to the desktop (the settings
+portal on Linux), so MyGo reads them once and keeps them until the next
+change.
+
+Pages hear them as the `--mygo-accent` and `--mygo-text-scale` CSS variables
+and the `mygo:preferences` event, see [the frontend guide](frontend.md);
+`prefers-reduced-motion` and `prefers-contrast` already follow the desktop.
+macOS has no text scale, so `Theme.TextScale()` is 1 there.
+
 ## Power
 
 ```go

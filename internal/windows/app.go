@@ -336,6 +336,11 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 			b.h.ThemeChanged()
 		}
 		return 0, false
+	case wmSysColorChange:
+		// A system color changed, as a contrast theme does: the accent and
+		// the settings of accessibility may have.
+		b.h.ThemeChanged()
+		return 0, false
 	case wmDisplayChange:
 		b.h.DisplaysChanged()
 		return 0, false

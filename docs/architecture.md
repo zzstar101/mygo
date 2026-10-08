@@ -1773,7 +1773,12 @@ either.
   (`ReadAll`, `SettingChanged`). A change goes through
   `Handler.ThemeChanged`, as the appearance's does; package `ui` reads them
   once until the next, the default theme follows them (`Theme.follow`), and
-  `Animate` follows reduced motion.
+  `Animate` follows reduced motion. Package `mygo` reads them the same way:
+  `Theme.Preferences()` (and `AccentColor`, `ReduceMotion`, `HighContrast`,
+  `TextScale`) keeps them until the next change, and every page hears them
+  through the `mygo:preferences` event and the `--mygo-accent` and
+  `--mygo-text-scale` CSS variables, the accent left unset where the desktop
+  has none.
 - **Lists** (`ui/list.go`) build only the rows in view and keep their
   place by a row, the anchor, and how far its top is above where the
   content starts, not by an offset into their content: rows are measured,
@@ -3147,6 +3152,7 @@ which npm allows only for packages that exist: the first release uses an
 | notifications | UserNotifications, packaged apps only; `Group` is the `threadIdentifier`; the delegate is attached at launch, for the click that launched the app | org.freedesktop.Notifications over D-Bus; no `Group` | notification-area balloons (toasts); no `Group` |
 | notification removal | `removeDeliveredNotificationsWithIdentifiers:`; `ClearNotifications` removes all, earlier runs' too | `CloseNotification` on the bus, for those of this run | hides the balloon, which goes away by itself anyway |
 | vibrancy | all materials, behind pages and native UI | ignored | Windows 11 22H2 Mica, Acrylic, Tabbed, behind pages and native UI, in windows created with a material, which have no menu bar |
+| accent color and accessibility preferences | `NSColor.controlAccentColor` (10.14+), `accessibilityDisplayShouldReduceMotion` (10.12+) and `accessibilityDisplayShouldIncreaseContrast` (10.10+), with `NSSystemColorsDidChangeNotification` and `NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification`; no text scale | GTK's `gtk-enable-animations` and theme name, and the settings portal's accent, contrast and GNOME's `text-scaling-factor` (`ReadAll`, `SettingChanged`) | DWM's `AccentColor`, `SPI_GETCLIENTAREAANIMATION`, `SPI_GETHIGHCONTRAST` and Accessibility's `TextScaleFactor`, with `WM_SETTINGCHANGE` and `WM_SYSCOLORCHANGE` |
 | traffic lights, Dock | yes | ignored | ignored |
 | hidden title bar | AppKit's traffic lights over a full-size content view | GTK's title buttons in header bars over the page, per `gtk-decoration-layout`; none where the Wayland compositor decorates windows | caption buttons drawn in a layered child window, through DirectComposition over a material; snap layouts; a top edge that resizes |
 | progress bar | Dock tile content view (NSBoxes: NSProgressIndicator does not draw there), app-wide | Unity launcher API over D-Bus (`com.canonical.Unity.LauncherEntry`), app-wide | `ITaskbarList3`, per window |

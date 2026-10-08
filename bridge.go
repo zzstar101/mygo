@@ -29,6 +29,43 @@ func (w *Window) bridgeScript() string {
 	})
 }
 
+// pagePreferences is the page's view of the desktop's settings: the accent
+// as a CSS color, and no accent at all where the desktop has none.
+func pagePreferences(p ThemePreferences) bridge.Preferences {
+	accent := ""
+	if p.Accent.A != 0 {
+		accent = p.Accent.String()
+	}
+	return bridge.Preferences{
+		Accent:       accent,
+		ReduceMotion: p.ReduceMotion,
+		HighContrast: p.HighContrast,
+		TextScale:    p.TextScale,
+	}
+}
+
+// preferencesScript installs the desktop preferences after the bridge.
+func preferencesScript() string {
+	return bridge.PreferencesScript(pagePreferences(Theme.preferences()))
+}
+
+// sendPreferences keeps existing pages up to date. Main thread only.
+func (w *Window) sendPreferences(prefs ThemePreferences) {
+	if w.content != nil || w.native == nil {
+		return
+	}
+	if msg, err := encodeEvent(bridge.PreferencesEvent, pagePreferences(prefs)); err == nil {
+		w.enqueue(msg, true)
+	}
+}
+
+func sendPreferences() {
+	prefs := Theme.preferences()
+	for _, w := range pageWindows() {
+		w.sendPreferences(prefs)
+	}
+}
+
 // decodeResult decodes the JSON result of eval into v.
 func decodeResult(raw []byte, v any) error { return json.Unmarshal(raw, v) }
 
@@ -151,6 +188,7 @@ func (w *Window) handleMessage(msg string) {
 		// The script at document start may tell a later page the room of
 		// the controls before a change.
 		w.sendTitleBar()
+		w.sendPreferences(Theme.preferences())
 		w.flush()
 		fire(&w.onDOMReady)
 		w.readyToShow()

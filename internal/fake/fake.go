@@ -42,6 +42,7 @@ type Backend struct {
 	ClipboardDuringFlush func()
 	theme                string
 	prefs                platform.Preferences
+	prefsReads           int
 	// Watching reports whether power events were asked for, Awake counts the
 	// KeepAwake calls not released yet.
 	Watching bool
@@ -795,6 +796,7 @@ func (t theme) SetSource(s string) {
 func (t theme) Preferences() platform.Preferences {
 	t.b.mu.Lock()
 	defer t.b.mu.Unlock()
+	t.b.prefsReads++
 	return t.b.prefs
 }
 
@@ -805,6 +807,14 @@ func (b *Backend) SetPreferences(p platform.Preferences) {
 	b.prefs = p
 	b.mu.Unlock()
 	b.h.ThemeChanged()
+}
+
+// PreferenceReads returns how many times Preferences() read the backend,
+// for tests.
+func (b *Backend) PreferenceReads() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.prefsReads
 }
 
 type tray struct{}

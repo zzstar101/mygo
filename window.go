@@ -511,7 +511,7 @@ func (w *Window) platformOptions(o *WindowOptions) *platform.WindowOptions {
 	if o.Parent != nil && o.Parent.native != nil {
 		p.Parent = o.Parent.native
 	}
-	p.UserScripts = []platform.UserScript{{Source: w.bridgeScript()}}
+	p.UserScripts = []platform.UserScript{{Source: w.bridgeScript()}, {Source: preferencesScript()}}
 	if po.PreloadScript != "" {
 		p.UserScripts = append(p.UserScripts, platform.UserScript{Source: po.PreloadScript})
 	}

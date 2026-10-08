@@ -131,6 +131,7 @@ await currentWindow.toggleMaximize();
 | `runtime()` | the runtime: `platform` (`"darwin"`, `"linux"` or `"win32"`), `windowId` (the Go window's `ID()`) and `version`; throws outside MyGo |
 | `currentWindow` | the page's window: `minimize`, `maximize`, `unmaximize`, `toggleMaximize`, `isMaximized`, `toggleFullScreen`, `close` and `setTitle` |
 | `onFileDrop(listener)` | files dropped on the window, with their paths |
+| `onPreferences(listener)` | the accent color and the accessibility settings of the desktop, and the changes that follow |
 
 Opened in a regular browser, which is handy for working on the layout,
 pages have no runtime: calls reject and `isMyGo()` is false.
@@ -284,6 +285,40 @@ mygo.NewWindow(mygo.WindowOptions{URL: "/", BackgroundColor: "light-dark(#f5f5f7
 
 `mygo.Theme.SetSource(mygo.ThemeDark)` forces an appearance, which pages see
 through the same media query.
+
+## Accent color and accessibility
+
+`prefers-reduced-motion` and `prefers-contrast` follow the desktop on their
+own. The accent color the desktop uses and the factor it asks text to grow
+by are what the media queries do not tell a page: they are CSS variables on
+`:root` from the first paint.
+
+| variable | |
+|---|---|
+| `--mygo-accent` | the accent as `#rrggbb`; unset where the desktop has none, so `var(--mygo-accent, AccentColor)` falls back to the desktop's own color |
+| `--mygo-text-scale` | the factor text grows by; `1` is the usual size, so `calc(1rem * var(--mygo-text-scale, 1))` |
+
+```css
+:root {
+  --accent: var(--mygo-accent, AccentColor);
+  font-size: calc(1rem * var(--mygo-text-scale, 1));
+}
+```
+
+The `mygo:preferences` event, and `onPreferences` of `mygo-runtime`, report
+the settings themselves and the changes that follow, which only the desktop
+can make:
+
+```ts
+import { onPreferences } from "mygo-runtime";
+
+onPreferences(({ accent, reduceMotion, highContrast, textScale }) => {
+  if (reduceMotion) document.documentElement.classList.add("reduce-motion");
+});
+```
+
+`mygo.Theme.Preferences()` reads them on the Go side, see
+[native](native.md#accent-color-and-accessibility).
 
 ## Links and new windows
 

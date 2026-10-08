@@ -719,7 +719,7 @@ type Theme interface {
 	// text where the system's text stack does not know them, as on Linux.
 	FontRendering() FontRendering
 	// Preferences returns the settings of the desktop that the system's
-	// controls follow. A change calls Handler.ThemeChanged.
+	// controls follow. A change of any of them calls Handler.ThemeChanged.
 	Preferences() Preferences
 }
 

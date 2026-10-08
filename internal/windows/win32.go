@@ -242,6 +242,7 @@ const (
 	wmQueryEndSession   = 0x0011
 	wmQuit              = 0x0012
 	wmEraseBkgnd        = 0x0014
+	wmSysColorChange    = 0x0015
 	wmEndSession        = 0x0016
 	wmSettingChange     = 0x001A
 	wmGetMinMaxInfo     = 0x0024
