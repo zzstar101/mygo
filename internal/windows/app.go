@@ -115,6 +115,9 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	b.taskbarButtonCreated = registerWindowMessage("TaskbarButtonCreated")
 	// Clipboard and drag/drop share startup-created OLE callback tables.
 	dropOnce.Do(initDropTarget)
+	// The interface-change callback needs a window to post to, so it starts
+	// once the application window exists; Status then reads fresh from then on.
+	startNetworkMonitor()
 	return nil
 }
 
@@ -346,6 +349,9 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 		}
 	case wmAppDeviceRemoved:
 		b.deviceRemoved(wp)
+		return 0, true
+	case wmAppNetwork:
+		b.h.NetworkChanged(b.Network().Status())
 		return 0, true
 	case wmQueryEndSession:
 		return 1, true

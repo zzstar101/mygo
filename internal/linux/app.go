@@ -125,6 +125,10 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 		bind(libGDK, &b.announceCSD, "gdk_wayland_window_announce_csd")
 	}
 	initCallbacks()
+	// The network monitor's status is read from the singleton, which
+	// GNetworkMonitor initializes on the main thread; connecting the
+	// signal here keeps Status correct from the first call.
+	startNetworkMonitor()
 	return nil
 }
 

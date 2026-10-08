@@ -156,6 +156,7 @@ func load() {
 		purego.RegisterLibFunc(&blockRelease, libObjC, "_Block_release")
 		mainNPFn = mustDlsym(purego.RTLD_DEFAULT, "pthread_main_np")
 		loadCF()
+		loadNetwork()
 	})
 }
 

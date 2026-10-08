@@ -127,6 +127,10 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 		uintptr(nsString("NSSystemColorsDidChangeNotification")), 0)
 	send(send(workspace(), "notificationCenter"), "addObserver:selector:name:object:", uintptr(b.delegate), uintptr(sel("preferencesChanged:")),
 		uintptr(nsString("NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification")), 0)
+
+	// The network monitor reports its first path asynchronously, so it
+	// starts before the app's ready dispatch, ahead of any Status call.
+	startNetworkMonitor()
 	return nil
 }
 

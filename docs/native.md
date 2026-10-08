@@ -202,6 +202,42 @@ awake. On Linux, `OnLockScreen` is called when the screen saver starts,
 which usually locks the screen, and `IdleTime` is 0 on desktops that do not
 report it.
 
+## Network
+
+`mygo.Network` tells whether the computer is online and whether the
+connection is expensive — a phone hotspot or a metered one, where an app
+should hold off on large downloads:
+
+```go
+status := mygo.Network.Status()
+if status.Online && !status.Constrained {
+	syncNow()
+}
+
+mygo.Network.OnChanged(func(s mygo.NetworkStatus) {
+	log.Printf("online: %v, constrained: %v", s.Online, s.Constrained)
+})
+```
+
+The monitor starts when the app does, so `Status` is ready without any
+setup and `OnChanged` reports later changes. `OnChanged` runs on the main
+thread and returns a function that removes the listener. `Constrained` is
+`nw_path_is_expensive` on macOS, metered on Linux and a variable-cost
+connection on Windows; it is false when the platform cannot tell.
+
+Pages already have `navigator.onLine`. To mirror the native status in the
+UI, broadcast a typed event from the listener, so the generated client
+receives it:
+
+```go
+// Connectivity is pushed to every window when the connection changes.
+var Connectivity = mygo.NewEvent[mygo.NetworkStatus]("connectivity")
+
+func init() {
+	mygo.Network.OnChanged(func(s mygo.NetworkStatus) { Connectivity.Broadcast(s) })
+}
+```
+
 ## Global shortcuts
 
 Global shortcuts work while the app is in the background, for example to
