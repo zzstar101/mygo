@@ -43,8 +43,11 @@ type Application struct {
 	// stateStore is the WindowStateStore, or nil for the file.
 	stateStore WindowStateStore
 	// locale is the tag SetLocale set, or "" to follow the system.
-	locale   string
-	finished sync.Once
+	locale string
+	// rememberLocale is whether RememberLocale keeps the tag SetLocale set
+	// across runs.
+	rememberLocale bool
+	finished       sync.Once
 
 	// quitting is only touched on the main thread.
 	quitting    bool
@@ -99,6 +102,9 @@ func (a *Application) Run() error {
 	a.running = true
 	a.mu.Unlock()
 	go cleanUpdateLeftovers()
+
+	// The language the app showed last time, when it remembers it.
+	a.restoreLocalePreference()
 
 	b := backend()
 	if err := b.Init(appHandler{}, platform.AppOptions{
@@ -411,6 +417,9 @@ func (a *Application) Locale() string {
 // mygo:locale event, and OnLocaleChanged tells the app to say its own in
 // it. An empty tag follows the user's preferred locale again, which is the
 // default.
+//
+// When the app remembers the language it shows (RememberLocale), the tag is
+// kept across runs, and an empty tag forgets it.
 func (a *Application) SetLocale(tag string) {
 	tag = strings.TrimSpace(tag)
 	a.mu.Lock()
@@ -422,6 +431,7 @@ func (a *Application) SetLocale(tag string) {
 	a.mu.Unlock()
 	postMain(func() {
 		locale := a.localeInEffect()
+		a.saveLocalePreference(tag)
 		localeChanged(locale)
 		fire1(&a.onLocaleChanged, locale)
 	})

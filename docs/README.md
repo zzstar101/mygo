@@ -90,7 +90,8 @@ that must start instantly.
   files and global shortcuts.
 - [Languages](i18n.md): the locale an app shows, the strings of the
   controls and how an app changes them, matching the desktop's language,
-  knowing when the locale changes, and writing plurals, numbers and dates.
+  knowing when the locale changes, writing plurals, numbers and dates, and
+  remembering the language a user picked.
 - [Clipboard and drag data](data-transfer.md): multiple representations,
   file lists, custom formats, lazy providers, and clipboard persistence.
 - [Audio](audio.md): sound effects, streamed music and sound an app makes
