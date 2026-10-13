@@ -1732,7 +1732,8 @@ func SwitchBase(c *Context, on *bool) Element {
 // The user resizes columns by dragging the edges of their headers, and
 // moves them by dragging the headers, which s.Columns keeps; columns wider
 // than the table scroll sideways, the header with them. With s.Sort, a
-// click on the header of a Sortable column sorts the rows by it.
+// click on the header of a Sortable column sorts the rows by it; with
+// s.SortBy, a Cmd-click sorts by it after the others.
 //
 //	cols := []ui.TableColumn{{Title: "Name", Sortable: true}, {Title: "Size", Width: 90, Align: ui.End, Sortable: true}}
 //	app.files.Selected, app.files.Sort = &app.file, &app.sort
@@ -3978,6 +3979,35 @@ func (_handle Element) NoWrap() Element {
 	return wrapElement(_node.NoWrap())
 }
 
+// OnEnter has fn see an Enter in the text input before the editor takes
+// it, on the main thread as the key comes. fn reports whether it took the
+// Enter; one taken changes nothing: a text area inserts no newline, and a
+// single-line input does not submit. Like ReadOnly, it holds for the input
+// that comes until the next frame.
+//
+// fn may run between frames, where an Element kept from the view is no
+// longer valid: it reads and replaces the text through e instead, as a
+// chat composer sends with Enter, clears what it sent, and breaks the line
+// with Shift+Enter:
+//
+//	ui.TextArea(c, &app.draft).OnEnter(func(e ui.Enter) bool {
+//		if e.Mods&ui.Shift != 0 {
+//			return false
+//		}
+//		app.send(e.Text())
+//		e.SetText("")
+//		return true
+//	})
+func (_handle Element) OnEnter(fn func(e Enter) bool) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.OnEnter(fn))
+}
+
 // OnPaste has fn see a paste into a text input, by Cmd+V, Ctrl+V or a
 // Paste menu item, before it is inserted, on the main thread as the paste
 // comes: text is the clipboard's text, empty when it holds none, as with
@@ -4689,10 +4719,10 @@ func (_handle Element) TextColor(c Color) Element {
 }
 
 // TextRanges styles runs of a text input's text, in the frames that call
-// it, with ranges that do not overlap. They follow the text as it is: an
-// app that finds them in the text finds them again as it changes. A
-// password shows none; an input method's composition shows unstyled
-// between them.
+// it. Where ranges overlap, the one starting first shows, or given first
+// when they start together. They follow the text as it is: an app that
+// finds them in the text finds them again as it changes. A password shows
+// none; an input method's composition shows unstyled between them.
 func (_handle Element) TextRanges(ranges ...TextRange) Element {
 	_node := _handle.node()
 	if _node == nil {

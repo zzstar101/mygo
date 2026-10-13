@@ -348,6 +348,9 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 	case wmAppDeviceRemoved:
 		b.deviceRemoved(wp)
 		return 0, true
+	case wmAppNetwork:
+		b.h.NetworkChanged(b.Network().Status())
+		return 0, true
 	case wmQueryEndSession:
 		return 1, true
 	case wmEndSession:

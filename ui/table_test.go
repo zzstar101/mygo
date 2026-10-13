@@ -2,6 +2,7 @@ package ui
 
 import (
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -351,4 +352,50 @@ func TestTableRoundRows(t *testing.T) {
 	if got := radius(&s, 0, true); got != round {
 		t.Errorf("a row of a table that does not choose, with RoundRows: %v", got)
 	}
+}
+
+// With SortBy, a Cmd-click sorts by several columns: it adds a column,
+// ascending, after those sorted by, makes it descending, then takes it
+// out. A click sorts by one column again.
+func TestTableSortBy(t *testing.T) {
+	var by []SortOrder
+	s := ListState{SortBy: &by}
+	cols := []TableColumn{{Title: "Name", Sortable: true}, {Title: "Kind", Width: 100, Sortable: true}, {Title: "Size", Width: 80, Sortable: true}}
+	tt := coreNewTester(tableView(&s, cols, []string{"a.txt", "b.txt"}), 500, 300)
+	check := func(step string, want ...SortOrder) {
+		t.Helper()
+		if !slices.Equal(by, want) {
+			t.Fatalf("%s: %+v, want %+v", step, by, want)
+		}
+	}
+	tt.Click("Name")
+	check("a click on Name", SortOrder{Column: "Name"})
+	tt.ClickWith(Cmd, "Kind")
+	check("a Cmd-click on Kind", SortOrder{Column: "Name"}, SortOrder{Column: "Kind"})
+	kept := by
+	tt.ClickWith(Cmd, "Size")
+	check("a Cmd-click on Size", SortOrder{Column: "Name"}, SortOrder{Column: "Kind"}, SortOrder{Column: "Size"})
+	if len(kept) != 2 {
+		t.Fatalf("a click changed the slice the app kept: %+v", kept)
+	}
+	tt.send(platform.SurfaceEvent{Kind: platform.AccessibilityOn})
+	if n := accessNode(t, tt.h.access, platform.RoleColumnHeader, "Size"); n.States&platform.AccessSortAscending == 0 || n.Label != "Size" {
+		t.Errorf("Size, sorted by after Name and Kind: %+v", n)
+	}
+	tt.ClickWith(Cmd, "Kind")
+	check("a second Cmd-click on Kind", SortOrder{Column: "Name"}, SortOrder{Column: "Kind", Descending: true}, SortOrder{Column: "Size"})
+	tt.ClickWith(Cmd, "Kind")
+	check("a third Cmd-click on Kind", SortOrder{Column: "Name"}, SortOrder{Column: "Size"})
+	// The first column goes the same way, the next taking its place.
+	tt.ClickWith(Cmd, "Name")
+	check("a Cmd-click on Name", SortOrder{Column: "Name", Descending: true}, SortOrder{Column: "Size"})
+	tt.ClickWith(Cmd, "Name")
+	check("a second Cmd-click on Name", SortOrder{Column: "Size"})
+	// A click sorts by one column again, and on the first reverses it.
+	tt.ClickWith(Cmd, "Kind")
+	tt.Click("Kind")
+	check("a click on Kind", SortOrder{Column: "Kind"})
+	tt.ClickWith(Cmd, "Name")
+	tt.Click("Kind")
+	check("a click on Kind, first", SortOrder{Column: "Kind", Descending: true})
 }

@@ -19,7 +19,22 @@ const scrollbarWidth = 10
 
 // input takes the editor's input as it comes.
 func (ed *editor) input(ev ui.InputEvent) bool {
+	if ed.offer(ev) {
+		return true
+	}
 	return ed.retry(func() bool { return ed.dispatch(ev) })
+}
+
+// offer gives the app's OnInput an event before the editor, once and
+// with the editor up to date with the buffer, and reports whether it
+// took it. It is not retried with the editor's own handling: what the app
+// does with an event it leaves, as edit the buffer, would happen twice.
+func (ed *editor) offer(ev ui.InputEvent) bool {
+	if ed.o.onInput == nil {
+		return false
+	}
+	ed.sync()
+	return ed.o.onInput(ev)
 }
 
 // retry runs fn, which edits the text as the editor shows it, again on
@@ -622,6 +637,10 @@ func (ed *editor) targets(r *ui.TextInputRange) []ui.TextInputRange {
 }
 
 func (ed *editor) ReplaceText(r *ui.TextInputRange, s string) {
+	// Text typed, rather than committing a composition, is input.
+	if !ed.markedActive && ed.offer(ui.InputEvent{Kind: ui.InputText, Text: s}) {
+		return
+	}
 	ed.retry(func() bool { ed.replaceText(r, s); return true })
 }
 

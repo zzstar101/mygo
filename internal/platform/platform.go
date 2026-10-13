@@ -85,8 +85,14 @@ type Backend interface {
 	Screen() Screen
 	Theme() Theme
 	Power() Power
+	Network() Network
 	// Secrets may be called before Init, from any goroutine.
 	Secrets() Secrets
+
+	// NewFileWatch starts watching files, with no target yet. notify is
+	// called on a goroutine of the backend, one notice at a time.
+	// NewFileWatch may be called before Init, from any goroutine.
+	NewFileWatch(notify func(FileWatchNotice)) (FileWatch, error)
 
 	NewTray(h TrayHandler) (Tray, error)
 	RegisterHotkey(id int, accelerator string) error
@@ -134,6 +140,9 @@ type AppHandler interface {
 	DisplaysChanged()
 	// PowerEvent is "suspend", "resume", "lock-screen" or "unlock-screen".
 	PowerEvent(event string)
+	// NetworkChanged reports the network's status, once Network.Watch was
+	// called, when it may have changed.
+	NetworkChanged(status NetworkStatus)
 	HotkeyPressed(id int)
 	NotificationClicked(id string)
 }
@@ -726,7 +735,7 @@ type Theme interface {
 	// text where the system's text stack does not know them, as on Linux.
 	FontRendering() FontRendering
 	// Preferences returns the settings of the desktop that the system's
-	// controls follow. A change calls Handler.ThemeChanged.
+	// controls follow. A change of any of them calls Handler.ThemeChanged.
 	Preferences() Preferences
 }
 
@@ -776,6 +785,21 @@ type Power interface {
 	KeepAwake(display bool, reason string) (release func())
 	OnBattery() bool
 	IdleTime() time.Duration
+}
+
+// NetworkStatus is the state of the computer's network connection.
+type NetworkStatus struct {
+	Online      bool
+	Constrained bool // expensive, metered or in a low data mode
+}
+
+// Network reports the state of the computer's network connection.
+type Network interface {
+	// Watch starts reporting AppHandler.NetworkChanged, which may also be
+	// called when the status stayed the same.
+	Watch()
+	// Status returns the current state.
+	Status() NetworkStatus
 }
 
 // ErrSecretNotFound is what Secrets.Secret fails with when the store has

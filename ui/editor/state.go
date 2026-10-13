@@ -51,6 +51,10 @@ type State struct {
 	NoFolding bool
 	// NoActiveLine stops highlighting the lines with a caret.
 	NoActiveLine bool
+	// CaretShape is the shape of the carets: bars by default, or blocks
+	// over the character after them, as Vim's normal mode has, or
+	// underlines, as its pending operators do.
+	CaretShape CaretShape
 	// FitContent makes the editor as high as its lines, to show in a
 	// scroll view or a list, rather than scrolling them itself.
 	FitContent bool
@@ -88,6 +92,20 @@ type State struct {
 	// GutterMarks marks lines in the gutter, as breakpoints or
 	// bookmarks: a dot of their color.
 	GutterMarks []GutterMark
+	// LineBackgrounds fill the rows of lines with colors, under the
+	// text and the selections, as the statement a key runs: not the
+	// gutter, nor the lines folds hide.
+	LineBackgrounds []LineBackground
+	// OnInput sees each input event before the editor, as keys for a
+	// mode of the app's such as Vim's: returning true takes it, and the
+	// editor leaves it. Text typed comes as InputText, outside an input
+	// method's composition.
+	OnInput func(ev ui.InputEvent) bool
+	// NoInputMethod keeps input methods from composing in the text:
+	// what they compose comes to OnInput as InputCompose, and text typed,
+	// or what an input method commits, as InputText, as keys for Vim's
+	// normal mode want.
+	NoInputMethod bool
 
 	// RenderFindBar, RenderGoToLine, RenderCompletions and RenderHover
 	// build the editor's find bar, go to line bar, completions and hovers
@@ -135,10 +153,28 @@ const (
 	WhitespaceBoundary
 )
 
+// CaretShape is the shape of the carets.
+type CaretShape uint8
+
+const (
+	CaretBar CaretShape = iota
+	// CaretBlock covers the character after the caret, a space's width at
+	// the end of a line, translucent so that the character shows.
+	CaretBlock
+	// CaretUnderline underlines the character after the caret.
+	CaretUnderline
+)
+
 // GutterMark marks a line in the gutter.
 type GutterMark struct {
 	Line  int
 	Color ui.Color
+}
+
+// LineBackground fills lines First to Last, from 0, with Color.
+type LineBackground struct {
+	First, Last int
+	Color       ui.Color
 }
 
 func (st *State) options() options {
@@ -146,10 +182,10 @@ func (st *State) options() options {
 		readOnly: st.ReadOnly, font: st.Font, lineHeight: st.LineHeight, tabSize: st.TabSize, indent: st.Indent,
 		wrap: st.SoftWrap, wrapColumn: st.WrapColumn, lineNumbers: st.LineNumbers, whitespace: st.Whitespace,
 		wrapGuides: st.WrapGuides, indentGuides: !st.NoIndentGuides, scrollPastEnd: !st.NoScrollPastEnd && !st.FitContent,
-		autoClose: !st.NoAutoClose, folding: !st.NoFolding, activeLine: !st.NoActiveLine, fitContent: st.FitContent,
+		autoClose: !st.NoAutoClose, folding: !st.NoFolding, activeLine: !st.NoActiveLine, caretShape: st.CaretShape, fitContent: st.FitContent,
 		placeholder: st.Placeholder, label: st.Label, theme: st.Theme, bindings: st.Bindings, gutterMarks: st.GutterMarks,
-		diffBase: st.DiffBase, onCompletion: st.OnCompletion, onHover: st.OnHover, onDefinition: st.OnDefinition,
-		onGutterClick: st.OnGutterClick, contextMenu: st.ContextMenu, minDigits: 3,
+		backgrounds: st.LineBackgrounds, diffBase: st.DiffBase, onCompletion: st.OnCompletion, onHover: st.OnHover, onDefinition: st.OnDefinition,
+		onGutterClick: st.OnGutterClick, contextMenu: st.ContextMenu, onInput: st.OnInput, noInputMethod: st.NoInputMethod, minDigits: 3,
 		renderFindBar: st.RenderFindBar, renderGoToLine: st.RenderGoToLine,
 		renderCompletions: st.RenderCompletions, renderHover: st.RenderHover,
 	}
@@ -352,6 +388,10 @@ func (st *State) SetSuggestion(offset int, text string) {
 // Focused reports whether the editor had the keyboard focus in the last
 // frame.
 func (st *State) Focused() bool { return st.ed.focused }
+
+// VisibleLines returns the first and the last line, from 0, that the
+// last frame showed, those hidden by folds among them.
+func (st *State) VisibleLines() (first, last int) { return st.ed.shown[0], st.ed.shown[1] }
 
 // ensure readies the state for methods called before the editor is
 // built.

@@ -126,7 +126,20 @@ and set the carets and selections, `Insert` types at each of them, `GoTo`
 moves the caret to a position and `ScrollTo` shows a line. `Find` opens
 the find bar on a query and `FindMatches` counts its matches; `Fold`,
 `Unfold` and `Folded` fold lines; `Focused` reports whether the editor has
-the keyboard focus.
+the keyboard focus, and `VisibleLines` the first and last lines the last
+frame showed, as a half page of Vim's moves by.
+
+`OnInput` sees each input event before the editor does: keys, the text
+typed, edit commands and the pointer. Returning true takes the event, and
+the editor leaves it; the others go on as without it. An app's own mode of
+editing, as Vim's normal mode, takes keys this way while the editor still
+shows and moves the carets. Letters typed come as `InputText`: on some
+systems their keys come first as `InputKeyDown` too, and taking a key
+doesn't take its text, so a mode reads letters from `InputText`. Text an
+input method composes goes to the editor alone, unless `NoInputMethod` is
+set: then no input method composes in the text, its composition comes to
+`OnInput` as `InputCompose`, and text typed, or committed by an input
+method, as `InputText`, as a mode that reads letters as commands wants.
 
 ## Options
 
@@ -135,6 +148,9 @@ the keyboard focus.
 - `LineNumbers` shows the gutter's numbers, absolute, relative to the
   caret's line, or not at all; `GutterMarks` put dots of a color by lines,
   as breakpoints, and `OnGutterClick` reports clicks on numbers.
+- `LineBackgrounds` fill lines, from `First` to `Last`, with a color under
+  the text and the selections, as the statement a key would run; the
+  gutter keeps its own, and lines a fold hides take no room to fill.
 - `TabSize` and `Indent` set indentation: tabs or spaces, as the
   language's files usually have them when zero (Go's tabs).
 - `Whitespace` shows spaces and tabs as dots and arrows: within selections
@@ -148,6 +164,9 @@ the keyboard focus.
   13 DIPs, 1.5 times as high, by default.
 - `NoAutoClose`, `NoFolding`, `NoActiveLine` and `NoScrollPastEnd` turn
   those behaviors off. `Placeholder` shows while the buffer is empty.
+- `CaretShape` paints carets as bars, as blocks over the character after
+  them, as Vim's normal mode does, translucent so that the character shows,
+  or as underlines, as its pending operators do.
 - `DiffBase` is the text the buffer's changes show against in the gutter,
   as the file in Git: bars mark the lines added and changed, and a mark
   where lines were deleted. Cmd+F8 goes to the next change, and Cmd+Alt+Z

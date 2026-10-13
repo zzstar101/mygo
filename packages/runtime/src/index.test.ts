@@ -8,9 +8,11 @@ import {
   isMyGo,
   on,
   onFileDrop,
+  onPreferences,
   runtime,
   type FileDrop,
   type Runtime,
+  type ThemePreferences,
 } from "./index";
 
 const calls: [string, unknown[]][] = [];
@@ -105,4 +107,15 @@ test("onFileDrop", () => {
   expect(got).toEqual([{ paths: ["/tmp/a.txt"], x: 10, y: 20 }]);
   off();
   expect(listeners.has("mygo:file-drop")).toBe(false);
+});
+
+test("onPreferences", () => {
+  (globalThis as { mygo?: Runtime }).mygo = fake;
+  const got: ThemePreferences[] = [];
+  const off = onPreferences((p) => got.push(p));
+  const preferences = { accent: "#ff8000", reduceMotion: true, highContrast: false, textScale: 1.25 };
+  listeners.get("mygo:preferences")?.(preferences);
+  expect(got).toEqual([preferences]);
+  off();
+  expect(listeners.has("mygo:preferences")).toBe(false);
 });

@@ -53,7 +53,7 @@ func textInputBase(c *context, value *string, multiline bool) *node {
 		ed.setText(*value)
 		ed.compose = ""
 	}
-	ed.readOnly, ed.password, ed.lines, ed.onPaste = false, false, [2]int{}, nil
+	ed.readOnly, ed.password, ed.lines, ed.onPaste, ed.onEnter = false, false, [2]int{}, nil, nil
 	ed.ranges = ed.ranges[:0]
 	e.onValueInput(stringInput)
 
@@ -95,6 +95,78 @@ func (e *node) OnPaste(fn func(text string) bool) *node {
 		ed.onPaste = fn
 	}
 	return e
+}
+
+// OnEnter has fn see an Enter in the text input before the editor takes
+// it, on the main thread as the key comes. fn reports whether it took the
+// Enter; one taken changes nothing: a text area inserts no newline, and a
+// single-line input does not submit. Like ReadOnly, it holds for the input
+// that comes until the next frame.
+//
+// fn may run between frames, where an Element kept from the view is no
+// longer valid: it reads and replaces the text through e instead, as a
+// chat composer sends with Enter, clears what it sent, and breaks the line
+// with Shift+Enter:
+//
+//	ui.TextArea(c, &app.draft).OnEnter(func(e ui.Enter) bool {
+//		if e.Mods&ui.Shift != 0 {
+//			return false
+//		}
+//		app.send(e.Text())
+//		e.SetText("")
+//		return true
+//	})
+func (e *node) OnEnter(fn func(e Enter) bool) *node {
+	if ed := e.st.editor; ed != nil && e.flags&flagEditable != 0 {
+		ed.onEnter = fn
+	}
+	return e
+}
+
+// Enter is an Enter pressed in a text input, as OnEnter's fn sees it. It
+// is valid while fn runs.
+type Enter struct {
+	// Mods are the modifiers held with the Enter.
+	Mods Modifiers
+	ed   *editor
+}
+
+// Text returns the text of the input as the Enter comes, which may be
+// ahead of the bound value: that takes what is typed as the next frame is
+// built.
+func (e Enter) Text() string {
+	if e.ed == nil || !e.ed.entering {
+		return ""
+	}
+	return e.ed.String()
+}
+
+// SetText replaces the text of the input, and its bound value, as the app
+// does by setting the value as the view is built: a composer clears the
+// draft it sent. Writing the bound value from fn is not enough, as the
+// editor writes what it holds over it.
+func (e Enter) SetText(s string) {
+	ed := e.ed
+	if ed == nil || !ed.entering {
+		return
+	}
+	if ed.document != nil {
+		// A TextBuffer takes the text as when the app sets it.
+		ed.document.Set(s)
+		ed.loadBuffer(ed.document.Snapshot())
+		ed.bufferDirty = false
+	} else {
+		ed.setText(s)
+		ed.compose = ""
+		if ed.value != nil {
+			*ed.value = s
+		}
+	}
+	if w := ed.client; w != nil {
+		// What the view built before the Enter shows the old text.
+		w.rt.consumed = true
+		w.rt.requestFrame()
+	}
 }
 
 // Lines makes a text area as high as its text, wrapped at its width, from
@@ -202,10 +274,10 @@ type TextRange struct {
 }
 
 // TextRanges styles runs of a text input's text, in the frames that call
-// it, with ranges that do not overlap. They follow the text as it is: an
-// app that finds them in the text finds them again as it changes. A
-// password shows none; an input method's composition shows unstyled
-// between them.
+// it. Where ranges overlap, the one starting first shows, or given first
+// when they start together. They follow the text as it is: an app that
+// finds them in the text finds them again as it changes. A password shows
+// none; an input method's composition shows unstyled between them.
 func (e *node) TextRanges(ranges ...TextRange) *node {
 	ed := e.st.editor
 	if ed == nil || e.flags&flagEditable == 0 {
@@ -214,8 +286,26 @@ func (e *node) TextRanges(ranges ...TextRange) *node {
 	for _, r := range ranges {
 		if r.End > r.Start {
 			ed.ranges = append(ed.ranges, r)
+			ed.apart = false
 		}
 	}
-	slices.SortFunc(ed.ranges, func(a, b TextRange) int { return a.Start - b.Start })
 	return e
+}
+
+// sortRanges sorts the ranges by start and clips where they overlap, as
+// TextRanges says, once the frame has given them all: a frame calling
+// TextRanges for each range sorts them once, and clipping ranges given
+// earlier would let a later one overlapping them win.
+func (ed *editor) sortRanges() {
+	slices.SortStableFunc(ed.ranges, func(a, b TextRange) int { return a.Start - b.Start })
+	apart := ed.ranges[:0]
+	for _, r := range ed.ranges {
+		if n := len(apart); n > 0 {
+			r.Start = max(r.Start, apart[n-1].End)
+		}
+		if r.End > r.Start {
+			apart = append(apart, r)
+		}
+	}
+	ed.ranges, ed.apart = apart, true
 }

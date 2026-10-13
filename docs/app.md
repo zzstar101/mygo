@@ -30,10 +30,10 @@ starts. It may also read what needs no running app, such as `App.Path`,
 `App.Locale` or `Power.IsOnBattery`, and register the app with the system
 (`App.SetOpenAtLogin`, `App.RegisterURLScheme`). Everything else needs the
 running app: when `main` calls the clipboard, displays, dialogs,
-notifications, global shortcuts, trays, Dock badges, `Theme.IsDark` and the
-like before `Run`, they panic with a message naming the call, on every
-platform. Use them from `WhenReady` on; other goroutines may call them
-earlier, and wait for the app to start.
+notifications, global shortcuts, trays, Dock badges, `Theme.IsDark`,
+`Theme.Preferences` and the like before `Run`, they panic with a message
+naming the call, on every platform. Use them from `WhenReady` on; other
+goroutines may call them earlier, and wait for the app to start.
 
 ## Threads
 

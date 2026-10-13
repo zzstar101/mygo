@@ -106,6 +106,7 @@ func (ed *editor) paint(p *ui.Painter, r ui.Rect) {
 	y1 := ed.scrollY + float64(min(r.H, clip.Y+clip.H-r.Y))
 	var f frame
 	f.first, f.last = ed.visibleLines(y0, y1)
+	ed.shown = [2]int{f.first, f.last}
 	if !v.advanceSyntax(f.last+1, 4*time.Millisecond) {
 		more = true
 	}
@@ -321,9 +322,14 @@ func (ed *editor) paintLine(p *ui.Painter, r ui.Rect, f *frame, line int, g line
 		if y > p.Visible().Y+p.Visible().H || y+lh < p.Visible().Y {
 			continue
 		}
-		// Backgrounds: the line's, then the caret's line.
+		// Backgrounds: the line's, the app's, then the caret's line.
 		if style.bg.A > 0 {
 			p.Fill(ui.Rect{X: textRect.X, Y: y, W: textRect.W, H: lh}, style.bg, 0)
+		}
+		for _, b := range ed.o.backgrounds {
+			if line >= b.First && line <= b.Last && b.Color.A > 0 {
+				p.Fill(ui.Rect{X: textRect.X, Y: y, W: textRect.W, H: lh}, b.Color, 0)
+			}
 		}
 		if active && !lineSelected {
 			p.Fill(ui.Rect{X: textRect.X, Y: y, W: textRect.W, H: lh}, ct.ActiveLine, 0)
@@ -433,10 +439,36 @@ func (ed *editor) paintLine(p *ui.Painter, r ui.Rect, f *frame, line int, g line
 					continue
 				}
 				x := ox + v.xOf(l, row, d)
-				p.Fill(ui.Rect{X: x - 1, Y: y, W: 2, H: lh}, ct.Cursor, 0)
+				switch ed.o.caretShape {
+				case CaretBlock:
+					p.Fill(ui.Rect{X: x, Y: y, W: ed.caretWidth(l, row, s.head, x-ox), H: lh}, ct.Cursor.Alpha(0.4), 0)
+				case CaretUnderline:
+					p.Fill(ui.Rect{X: x, Y: y + lh - 2, W: ed.caretWidth(l, row, s.head, x-ox), H: 2}, ct.Cursor, 0)
+				default:
+					p.Fill(ui.Rect{X: x - 1, Y: y, W: 2, H: lh}, ct.Cursor, 0)
+				}
 			}
 		}
 	}
+}
+
+// caretWidth returns the width of a block or underline caret at offset
+// at, x in row: that of the character after it, with its combining marks,
+// or of a space at the end of the line or of the row.
+func (ed *editor) caretWidth(l *lineLayout, row *rowLayout, at int, x float32) float32 {
+	v := &ed.view
+	end := min(graphemeRight(v.text, at), l.start+len(l.text))
+	if end <= at {
+		return v.charWidth
+	}
+	d := l.toDisp(end-l.start, false)
+	if d > row.to {
+		return v.charWidth
+	}
+	if w := v.xOf(l, row, d) - x; w > 0 {
+		return w
+	}
+	return v.charWidth
 }
 
 func (s lineLook) word(ct *Theme, ed *editor) ui.Color {
