@@ -1,77 +1,89 @@
 package fake
 
-import "github.com/egoist/mygo/internal/platform"
+import (
+	"sync"
 
-// FileWatch records enrollments and permits deterministic native invalidations.
-// All methods, field access and Notify calls belong to main.
+	"github.com/egoist/mygo/internal/platform"
+)
+
+// FileWatch records the targets the core enrolls; tests report changes
+// with Notify.
 type FileWatch struct {
-	Targets    map[uint64]platform.FileWatchTarget
-	Notify     func(platform.FileWatchNotice)
-	AddError   error
-	DelayAdd   bool
-	DelayClose bool
-	pending    []func(error)
-	done       chan struct{}
-	closed     bool
-	backend    *Backend
+	mu      sync.Mutex
+	targets map[uint64]platform.FileWatchTarget
+	notify  func(platform.FileWatchNotice)
+	closed  bool
+	// Subtree makes Add accept Subtree targets, as Windows does.
+	Subtree bool
+	// AddHook, when set, runs in Add before the target is enrolled; an
+	// error it returns is Add's.
+	AddHook func(platform.FileWatchTarget) error
 }
 
-func (b *Backend) NewFileWatch(_ func(func()) bool, notify func(platform.FileWatchNotice)) (platform.FileWatch, error) {
-	if !b.IsMainThread() {
-		panic("fake: file watch off main")
-	}
+func (b *Backend) NewFileWatch(notify func(platform.FileWatchNotice)) (platform.FileWatch, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.FileWatchError != nil {
 		return nil, b.FileWatchError
 	}
-	w := &FileWatch{Targets: make(map[uint64]platform.FileWatchTarget), done: make(chan struct{}), backend: b}
-	w.Notify = func(n platform.FileWatchNotice) {
-		w.check()
-		if !w.closed {
-			notify(n)
-		}
-	}
+	w := &FileWatch{targets: map[uint64]platform.FileWatchTarget{}, notify: notify, Subtree: b.FileWatchSubtree}
 	b.FileWatches = append(b.FileWatches, w)
 	return w, nil
 }
-func (w *FileWatch) check() {
-	if !w.backend.IsMainThread() {
-		panic("fake: file watch off main")
-	}
-}
-func (w *FileWatch) Add(t platform.FileWatchTarget, done func(error)) {
-	w.check()
-	if w.AddError == nil {
-		w.Targets[t.ID] = t
-	}
-	if w.DelayAdd {
-		w.pending = append(w.pending, done)
-	} else {
-		done(w.AddError)
-	}
+
+// LastFileWatch returns the FileWatch created last.
+func (b *Backend) LastFileWatch() *FileWatch {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.FileWatches[len(b.FileWatches)-1]
 }
 
-// CompleteAdds releases deferred acknowledgments on main.
-func (w *FileWatch) CompleteAdds(err error) {
-	w.check()
-	pending := w.pending
-	w.pending = nil
-	for _, fn := range pending {
-		fn(err)
+func (w *FileWatch) Add(t platform.FileWatchTarget) error {
+	if t.Subtree && !w.Subtree {
+		return platform.ErrUnsupported
 	}
-}
-func (w *FileWatch) Remove(id uint64) { w.check(); delete(w.Targets, id) }
-func (w *FileWatch) Close() <-chan struct{} {
-	w.check()
-	if !w.closed {
-		w.closed = true
-		clear(w.Targets)
-		w.CompleteAdds(platform.ErrUnsupported)
-		if !w.DelayClose {
-			close(w.done)
+	if hook := w.AddHook; hook != nil {
+		if err := hook(t); err != nil {
+			return err
 		}
 	}
-	return w.done
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.targets[t.ID] = t
+	return nil
 }
 
-// CompleteClose may run on any goroutine, independently of main dispatch.
-func (w *FileWatch) CompleteClose() { close(w.done) }
+func (w *FileWatch) Remove(id uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.targets, id)
+}
+
+func (w *FileWatch) Close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.closed = true
+	clear(w.targets)
+}
+
+// Targets returns the enrolled targets.
+func (w *FileWatch) Targets() []platform.FileWatchTarget {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	targets := make([]platform.FileWatchTarget, 0, len(w.targets))
+	for _, t := range w.targets {
+		targets = append(targets, t)
+	}
+	return targets
+}
+
+// Notify reports n, as a backend's goroutine would, unless the watch is
+// closed.
+func (w *FileWatch) Notify(n platform.FileWatchNotice) {
+	w.mu.Lock()
+	closed := w.closed
+	w.mu.Unlock()
+	if !closed {
+		w.notify(n)
+	}
+}

@@ -14,10 +14,17 @@ import (
 	"github.com/egoist/mygo/internal/watchdriver"
 )
 
+// inotifyGeneration is the targets sharing an inotify watch descriptor:
+// inotify returns the same descriptor for the same directory, and a
+// descriptor removed (retired) can still have events queued before its
+// IN_IGNORED, while a new watch of the directory reuses it.
 type inotifyGeneration struct {
 	ids     []uint64
 	retired bool
 }
+
+// inotifyWatch watches directories with inotify, which names the child
+// that changed; files are watched through their directory.
 type inotifyWatch struct {
 	fd, epoll   int
 	pipe        [2]int
@@ -27,7 +34,7 @@ type inotifyWatch struct {
 	closed      bool
 }
 
-func (*Backend) NewFileWatch(post func(func()) bool, notify func(platform.FileWatchNotice)) (platform.FileWatch, error) {
+func (*Backend) NewFileWatch(notify func(platform.FileWatchNotice)) (platform.FileWatch, error) {
 	fd, err := syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
 	if err != nil {
 		return nil, err
@@ -49,9 +56,12 @@ func (*Backend) NewFileWatch(post func(func()) bool, notify func(platform.FileWa
 			return nil, err
 		}
 	}
-	return watchdriver.New(d, post, notify), nil
+	return watchdriver.New(d, notify), nil
 }
 func (d *inotifyWatch) Add(t platform.FileWatchTarget) error {
+	if t.Subtree {
+		return platform.ErrUnsupported
+	}
 	if !t.Directory {
 		return nil
 	}
@@ -189,7 +199,8 @@ func (d *inotifyWatch) Wait() ([]platform.FileWatchNotice, error) {
 			}
 			for _, r := range records {
 				if r.mask&syscall.IN_Q_OVERFLOW != 0 {
-					return nil, platform.ErrFileWatchOverflow
+					notices = append(notices, platform.FileWatchNotice{Err: platform.ErrFileWatchOverflow})
+					continue
 				}
 				gens := d.generations[r.wd]
 				if len(gens) == 0 {
@@ -203,17 +214,22 @@ func (d *inotifyWatch) Wait() ([]platform.FileWatchNotice, error) {
 						d.generations[r.wd] = gens[1:]
 					}
 					if !g.retired {
-						return nil, errors.New("inotify watch revoked")
+						// The directory's filesystem was unmounted, or
+						// inotify dropped the watch for another reason.
+						for _, id := range g.ids {
+							notices = append(notices, platform.FileWatchNotice{Target: id, Kind: platform.FileWatchLost})
+							delete(d.targets, id)
+						}
 					}
 					continue
 				}
 				if g.retired || len(g.ids) == 0 {
 					continue
 				}
-				notice := platform.FileWatchNotice{Target: g.ids[len(g.ids)-1], Name: r.name, Cookie: uint64(r.cookie)}
+				notice := platform.FileWatchNotice{Target: g.ids[len(g.ids)-1], Name: r.name}
 				switch {
 				case r.mask&syscall.IN_UNMOUNT != 0:
-					notice.Err = errors.New("watched filesystem unmounted")
+					continue // IN_IGNORED follows
 				case r.mask&syscall.IN_MOVED_FROM != 0:
 					notice.Kind = platform.FileWatchMoveFrom
 				case r.mask&syscall.IN_MOVED_TO != 0:
@@ -231,9 +247,6 @@ func (d *inotifyWatch) Wait() ([]platform.FileWatchNotice, error) {
 					g.retired = true
 				}
 				notices = append(notices, notice)
-				if len(notices) > 4096 {
-					return nil, platform.ErrFileWatchOverflow
-				}
 			}
 		}
 	}

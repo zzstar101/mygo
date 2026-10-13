@@ -86,8 +86,8 @@ that must start instantly.
 - [Menus and the tray](menus.md): application, context and Dock menus,
   keyboard shortcuts and tray icons.
 - [Desktop APIs](native.md): dialogs, notifications, the clipboard, the
-  shell, displays, dark mode, power, the network status, secrets and
-  global shortcuts.
+  shell, displays, dark mode, power, the network status, secrets, watching
+  files and global shortcuts.
 - [Clipboard and drag data](data-transfer.md): multiple representations,
   file lists, custom formats, lazy providers, and clipboard persistence.
 - [Audio](audio.md): sound effects, streamed music and sound an app makes
@@ -119,15 +119,14 @@ components, from buttons to tables.
 
 ## Official plugins
 
-- [Watch](plugins/watch.md): filesystem watches for Go/native UI and
-  app-authorized page streams.
-
 - [Fetch](plugins/fetch.md): a `fetch` that makes HTTP requests from Go,
   with no CORS, any header, streamed bodies and cancellation.
 - [WebSocket](plugins/websocket.md): a `WebSocket` whose connections Go
   makes, with headers on the handshake.
 - [SQLite](plugins/sqlite.md): local databases with parameterized queries
   and atomic transactions, without cgo.
+- [Watch](plugins/watch.md): changes to files, in the directories the app
+  lets pages watch.
 - [Updater](plugins/updater.md): an update window in the manner of
   Sparkle, which checks for updates and offers to install them.
 - [Terminal](plugins/terminal.md): a terminal for native UI, which runs

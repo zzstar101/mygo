@@ -6,15 +6,14 @@ JavaScript package whose functions call them. The app uses the Go half with
 
 ## Official plugins
 
-- [Watch](plugins/watch.md): app-authorized filesystem invalidation streams;
-  the default plugin denies all roots.
-
 - [Fetch](plugins/fetch.md): a `fetch` that makes HTTP requests from Go,
   with no CORS, any header, streamed bodies and cancellation.
 - [WebSocket](plugins/websocket.md): a `WebSocket` whose connections Go
   makes, with headers on the handshake.
 - [SQLite](plugins/sqlite.md): local databases, parameterized queries and
   atomic transactions, using SQLite's C engine compiled with Zig, without cgo.
+- [Watch](plugins/watch.md): changes to files, in the directories the app
+  lets pages watch.
 - [Updater](plugins/updater.md): an update window in the manner of
   Sparkle, which checks for updates and offers to install them. It is all
   Go, and its window is a web page or, for apps of native UI, native UI.

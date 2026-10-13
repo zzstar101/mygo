@@ -1,121 +1,118 @@
 # Watch
 
-Watch existing directories from Go/native UI with `mygo.WatchFiles`, or expose
-app-approved root aliases to pages with `@mygo-plugins/watch`. The page adapter
-uses the same core watcher; Go callers do not need to register a plugin.
+The watch plugin lets pages follow changes to files in the directories the
+app lets them watch, such as a project open in an editor. Go code and
+native UI don't need it: they call `mygo.WatchFiles` directly (see
+[Watching files](../native.md#watching-files)), which the plugin uses too.
 
-## Set up page access
+## Set up
+
+Use the plugin in Go with the directories pages may watch, each under a
+name:
 
 ```go
-import "github.com/egoist/mygo/plugins/watch"
+import (
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/watch"
+)
 
-mygo.Use(watch.New(watch.Options{
-    Roots: map[string]watch.Root{
-        "project": {Path: projectDir, Recursive: true},
-    },
-}))
+func main() {
+	mygo.Use(watch.New(watch.Options{
+		Roots: map[string]watch.Root{
+			"project": {Path: projectDir, Recursive: true},
+		},
+	}))
+	// ...
+}
 ```
 
-`projectDir` must be an absolute existing directory. `mygo.Use` resolves configured
-symlinks (including macOS `/tmp` and `/var` aliases) once, then validates and pins
-the canonical directory. Events stay relative to that canonical root; descendant
-symlinks/reparse points are not followed. Configuration is copied and validated
-without launching a GUI.
-The default `watch.Plugin` denies all access. `Allow(ctx, alias)` may further
-restrict configured aliases, for example using `mygo.CallerWindow(ctx)`; it
-cannot grant access to another location. Recursive requests require permission.
+and add its package to the frontend:
 
 ```sh
 bun add @mygo-plugins/watch
 ```
 
-```ts
-import { watch } from "@mygo-plugins/watch";
-const watcher = await watch("project", { recursive: true, debounceMs: 75 });
-try {
-  for await (const event of watcher) console.log(event.op, event.path);
-} finally {
-  await watcher.close();
-}
-```
+Pages name a directory by its name in `Roots`, never by a path, so they
+can't watch anything else. A name is lowercase letters, digits and dashes,
+starting with a letter. A path must be absolute and a directory when
+`mygo.Use` runs, which panics otherwise; it resolves the path's symlinks,
+as macOS's `/tmp` is one. `watch.Plugin`, without roots, lets pages watch
+nothing.
 
-The promise resolves after setup, not after the watch ends. One iterator lazily
-consumes events; breaking iteration closes the watch. `close()` is idempotent
-and waits for Go cleanup. `closed` also settles after cleanup, rejecting on
-failure. An optional `signal` aborts with its reason. Page navigation/window
-closure cancels the channel. Each page generation has an independent quota:
-8 watches by default (`MaxWatchesPerPage`), with a fixed service ceiling of 128.
-
-## Go and native UI
-
-Call after the application starts; use a goroutine for long waits:
+`Recursive` lets pages watch the directories in the directory too; without
+it they can only watch the directory itself. `Allow`, when set, is asked
+before each watch, with the call's context (`mygo.CallerWindow(ctx)` is the
+window asking) and the name, and can refuse it:
 
 ```go
-w, err := mygo.WatchFiles(ctx, directory, mygo.FileWatchOptions{Recursive: true})
-if err != nil { return err }
-defer w.Close()
-for {
-    event, err := w.Next(ctx)
-    if err != nil { return err }
-    invalidate(event.Path)
+watch.New(watch.Options{
+	Roots: roots,
+	Allow: func(ctx context.Context, root string) bool {
+		return mygo.CallerWindow(ctx) == editorWindow
+	},
+})
+```
+
+Each page can watch 8 directories at a time (`MaxWatchesPerPage`), and all
+pages 128.
+
+## Watching
+
+`watch` starts a watch and resolves once everything is watched. Iterate it
+for the changes:
+
+```ts
+import { watch } from "@mygo-plugins/watch";
+
+const watcher = await watch("project", { recursive: true });
+for await (const event of watcher) {
+  console.log(event.op, event.path, event.oldPath);
 }
 ```
 
-`Next` cancellation cancels only that wait; the constructor context cancels the
-watch. Main-thread setup/Next pump native events. `Close` requests cleanup
-without blocking; `Done` closes when cleanup finishes. Do not directly wait on
-`Done` from the UI thread. Application shutdown closes watches before `OnQuit`.
+An event has `op`, one of `create`, `write`, `remove` and `rename`, `path`,
+relative to the directory and separated by slashes (`.` is the directory
+itself), `oldPath`, where a rename moved from, and `isDir`. What is already
+there when the watch starts is not reported.
 
-## Semantics and recovery
+Changes wait for 50 ms of quiet before they are reported, and never more
+than 500 ms while more keep coming; `debounceMs` sets the quiet, and `0`
+reports them right away. A watch compares what it sees with what it saw,
+so events say what is different, not every step that made it so: a file
+written many times in a row is one write, and one created and removed in
+between is nothing. Treat them as hints to read the files again.
 
-Events are invalidation hints, **not a filesystem journal**. Paths are
-slash-relative; `.` denotes the root. No initial listing is emitted. Operations
-are `create`, `write` (including metadata), `remove`, and `rename` (`oldPath` is
-the source). Rename pairing is best effort using unique identity evidence;
-ambiguous moves use remove/create. Replacing an entry produces remove/create.
-Directory renames do not synthesize a rename for every descendant.
+`watcher.close()`, `break` out of the loop, or an `AbortSignal` passed as
+`signal` stop the watch, and so does the page navigating or closing.
+`watcher.closed` settles once Go has stopped it, and rejects with the
+error that stopped it. Errors are `WatchError`s, whose `code` is:
 
-Defaults: 50 ms trailing debounce, 500 ms maximum debounce delay, 1024 queued
-events and 8192 snapshot entries. Go negative `Debounce` disables the quiet
-period; page `debounceMs: 0` does the same. Page debounce accepts integers
-0–60000 and raises maximum delay to match. Scanning/scheduling may add latency.
-Repeated writes coalesce; create/remove within one window can disappear.
-Symlinks/reparse descendants remain leaf entries and are never traversed.
+- `denied`: the name is not one of the roots, `Allow` refused, or the page
+  asked for a recursive watch of a root without `Recursive`;
+- `limit`: the page or the app watch too many directories, or the directory
+  has more than 8192 files and directories;
+- `overflow`: more changes waited than the page read, and some were lost;
+- `unsupported`: the platform can't watch files;
+- `path-encoding`: a file's name is not valid UTF-8, which pages can't be
+  given;
+- `io`: anything else, such as the directory being removed.
 
-Overflow stops the watch with `mygo.ErrWatchOverflow`; exceeding the entry cap
-stops it with `mygo.ErrWatchLimit`. Re-read state and construct a new watcher.
-Entries deleted during enumeration are skipped. Replacements during enrollment
-are retried a bounded number of times, then skipped; an observed race retains a
-write/create invalidation hint for the entry or its containing directory, even
-during setup. Required-subtree permission errors, revoked watches and root
-disappearance/identity changes remain terminal. There is no polling fallback or
-automatic restart. `Err` retains the terminal failure, and explicit
-close discards pending events. The page receives sanitized `WatchError` codes:
-`denied`, `limit`, `overflow`, `unsupported`, `path-encoding`, or `io`.
-Invalid UTF-8 filenames remain usable in Go but terminate page streams rather
-than leaking ambiguous replacement-character paths. Transport errors remain
-ordinary errors. Native paths are never included in page errors.
+After `overflow`, read the files again and start a new watch.
 
-## Security and platform limits
+## Platforms
 
-**Only expose app-controlled roots protected against hostile local writers.**
-Aliases prevent pages from selecting arbitrary paths; anchored enumeration and
-identity-checked native registration mitigate races, but this is not a
-kernel-enforced sandbox against another process replacing or moving directories.
-No file contents are transmitted. No glob filters, file-only watches, nonexistent
-roots, dynamic grants, persistent cursors or symlink following are supported.
+Watches follow what is in the directory, not where symlinks and Windows
+junctions in it point. Only expose directories the app controls: names
+keep pages from choosing paths, but another program can still move or
+replace what is in a directory.
 
-- macOS 12+: kqueue vnode hints, a descriptor per regular file/directory. Process
-  descriptor limits can fail setup below the configured entry cap.
-- Linux: inotify, with recursive directory enrollment in Go. Kernel watch limits
-  apply; queue overflow is terminal.
-- Windows amd64/arm64: overlapped `ReadDirectoryChangesW`, a worker and 64 KiB
-  buffer per directory. A private parent sentinel detects root identity changes
-  without exposing siblings. Volume-root watches are unsupported.
-- Unsupported OS/architectures return an unsupported error. Windows 386 keeps
-  compiling through the existing unsupported adapter.
-
-Local filesystems are the supported baseline. Network filesystems, mmap writes,
-mount changes and external volumes have OS-dependent visibility. Broken remote
-filesystem drivers can delay cleanup; pinned Windows buffers remain owned until
-I/O completion. No content-complete-save or exactly-once guarantee is made.
+- macOS watches with kqueue, which takes a file descriptor for every file
+  and directory watched.
+- Linux watches each directory with inotify, whose limits are those of the
+  system (`fs.inotify.max_user_watches`, and `max_user_instances`, as each
+  watch takes an instance).
+- Windows watches a recursive directory with one `ReadDirectoryChangesW`,
+  so the directories in it can be renamed, and also watches its parent to
+  know when it is renamed. While a directory is watched, Windows doesn't let
+  its parent and the directories above be renamed, as for every program
+  that watches files. It can't watch the root of a drive.

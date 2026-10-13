@@ -7,8 +7,10 @@ import (
 	"errors"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -16,205 +18,239 @@ import (
 	"github.com/egoist/mygo/internal/watchdriver"
 )
 
-var (
-	watchCreateEvent = systemDLL("kernel32.dll").NewProc("CreateEventW")
-	watchGetResult   = systemDLL("kernel32.dll").NewProc("GetOverlappedResult")
-)
-
+// directoryWatch watches directories with ReadDirectoryChangesW, every
+// directory's I/O completing on one completion port that the goroutine of
+// the watch waits on. A Subtree target watches a whole tree with one
+// handle: Windows doesn't let a directory be renamed while a handle is
+// open on something beneath it, so a handle per directory would keep the
+// directories of the tree from being renamed.
 type directoryWatch struct {
-	sessions map[uint64]*directorySession
-	retired  []*directorySession
-	notices  chan platform.FileWatchNotice
-	lost     chan struct{}
-	wake     chan struct{}
-}
-type directorySession struct {
-	file     *os.File
-	handle   syscall.Handle
-	overlap  syscall.Overlapped
-	storage  [16384]uint32
-	pin      runtime.Pinner
-	mu       sync.Mutex
-	stopping bool
-	done     chan struct{}
-	target   uint64
-	owner    *directoryWatch
+	port     syscall.Handle
+	mu       sync.Mutex // guards closed, for Wake
+	closed   bool
+	next     uint32
+	sessions map[uint32]*directorySession // by key, until their I/O completes
+	targets  map[uint64]*directorySession
 }
 
-func (*Backend) NewFileWatch(post func(func()) bool, notify func(platform.FileWatchNotice)) (platform.FileWatch, error) {
-	d := &directoryWatch{sessions: make(map[uint64]*directorySession), notices: make(chan platform.FileWatchNotice, 4096), lost: make(chan struct{}, 1), wake: make(chan struct{}, 1)}
-	return watchdriver.New(d, post, notify), nil
+type directorySession struct {
+	key     uint32
+	target  uint64
+	handle  syscall.Handle
+	subtree bool
+	removed bool
+	overlap syscall.Overlapped
+	buffer  [16384]uint32 // 64 KiB, the most a network share takes, aligned as the records need
+	pin     runtime.Pinner
 }
+
+// Completion keys: 0 wakes the goroutine, sessions count from 1.
+const watchWakeKey = 0
+
+// errorNotifyEnumDir is what ReadDirectoryChangesW fails with when more
+// changed than its buffer could hold.
+const errorNotifyEnumDir = syscall.Errno(1022)
+
+// leakedSessions keeps the buffers of I/O that never completed after Close
+// from being reused while Windows can still write to them.
+var leakedSessions struct {
+	sync.Mutex
+	sessions []*directorySession
+}
+
+func (*Backend) NewFileWatch(notify func(platform.FileWatchNotice)) (platform.FileWatch, error) {
+	port, err := syscall.CreateIoCompletionPort(syscall.InvalidHandle, 0, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+	d := &directoryWatch{port: port, sessions: map[uint32]*directorySession{}, targets: map[uint64]*directorySession{}}
+	return watchdriver.New(d, notify), nil
+}
+
 func (d *directoryWatch) Add(t platform.FileWatchTarget) error {
 	if !t.Directory {
-		return nil
+		return nil // files are watched through their directory
 	}
 	path, err := syscall.UTF16PtrFromString(t.Path)
 	if err != nil {
 		return err
 	}
-	h, err := syscall.CreateFile(path, syscall.FILE_LIST_DIRECTORY, syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE, nil, syscall.OPEN_EXISTING, syscall.FILE_FLAG_BACKUP_SEMANTICS|syscall.FILE_FLAG_OVERLAPPED|syscall.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	share := uint32(syscall.FILE_SHARE_READ | syscall.FILE_SHARE_WRITE | syscall.FILE_SHARE_DELETE)
+	h, err := syscall.CreateFile(path, syscall.FILE_LIST_DIRECTORY, share, nil, syscall.OPEN_EXISTING, syscall.FILE_FLAG_BACKUP_SEMANTICS|syscall.FILE_FLAG_OVERLAPPED|syscall.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
+		return &os.PathError{Op: "watch", Path: t.Path, Err: err}
+	}
+	if err = sameDirectory(h, t.Path, t.Info); err != nil {
+		syscall.CloseHandle(h)
+		return &os.PathError{Op: "watch", Path: t.Path, Err: err}
+	}
+	d.next++
+	s := &directorySession{key: d.next, target: t.ID, handle: h, subtree: t.Subtree}
+	if _, err = syscall.CreateIoCompletionPort(h, d.port, s.key, 0); err != nil {
+		syscall.CloseHandle(h)
 		return err
 	}
-	f := os.NewFile(uintptr(h), t.Path)
-	var native syscall.ByHandleFileInformation
-	if err = syscall.GetFileInformationByHandle(h, &native); err != nil {
-		f.Close()
-		return err
-	}
-	if native.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		f.Close()
-		return errors.New("watch target is a reparse point")
-	}
-	info, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return err
-	}
-	if !os.SameFile(info, t.Info) {
-		f.Close()
-		return errors.New("watch target identity changed")
-	}
-	event, _, e := watchCreateEvent.Call(0, 1, 0, 0)
-	if event == 0 {
-		f.Close()
-		return e
-	}
-	s := &directorySession{file: f, handle: h, overlap: syscall.Overlapped{HEvent: syscall.Handle(event)}, done: make(chan struct{}), owner: d, target: t.ID}
-	s.pin.Pin(&s.overlap)
-	s.pin.Pin(&s.storage[0])
+	s.pin.Pin(s)
 	if err = s.arm(); err != nil {
 		s.pin.Unpin()
-		syscall.CloseHandle(s.overlap.HEvent)
-		f.Close()
+		syscall.CloseHandle(h)
 		return err
 	}
-	d.sessions[t.ID] = s
-	go s.run()
+	d.sessions[s.key] = s
+	d.targets[t.ID] = s
 	return nil
 }
+
+// sameDirectory checks that h is the directory info describes and not a
+// reparse point. The handle can't be given to the os package, which would
+// tie it to the Go runtime's completion port, so a second handle does.
+func sameDirectory(h syscall.Handle, name string, info os.FileInfo) error {
+	path, err := syscall.UTF16PtrFromString(name)
+	if err != nil {
+		return err
+	}
+	var native syscall.ByHandleFileInformation
+	if err = syscall.GetFileInformationByHandle(h, &native); err != nil {
+		return err
+	}
+	if native.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 || native.FileAttributes&syscall.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		return errors.New("not a directory")
+	}
+	share := uint32(syscall.FILE_SHARE_READ | syscall.FILE_SHARE_WRITE | syscall.FILE_SHARE_DELETE)
+	const fileReadAttributes = 0x80
+	check, err := syscall.CreateFile(path, fileReadAttributes, share, nil, syscall.OPEN_EXISTING, syscall.FILE_FLAG_BACKUP_SEMANTICS|syscall.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return err
+	}
+	f := os.NewFile(uintptr(check), name)
+	defer f.Close()
+	var other syscall.ByHandleFileInformation
+	if err = syscall.GetFileInformationByHandle(check, &other); err != nil {
+		return err
+	}
+	checked, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if other.VolumeSerialNumber != native.VolumeSerialNumber || other.FileIndexHigh != native.FileIndexHigh || other.FileIndexLow != native.FileIndexLow || !os.SameFile(checked, info) {
+		return errors.New("watch target identity changed")
+	}
+	return nil
+}
+
 func (s *directorySession) arm() error {
 	// FILE_NOTIFY_CHANGE_FILE_NAME | DIR_NAME | ATTRIBUTES | SIZE | LAST_WRITE.
-	err := syscall.ReadDirectoryChanges(s.handle, (*byte)(unsafe.Pointer(&s.storage[0])), 65536, false, 0x1f, nil, &s.overlap, 0)
-	if err == syscall.ERROR_IO_PENDING {
-		return nil
-	}
-	return err
+	return syscall.ReadDirectoryChanges(s.handle, (*byte)(unsafe.Pointer(&s.buffer[0])), uint32(len(s.buffer)*4), s.subtree, 0x1f, nil, &s.overlap, 0)
 }
-func (s *directorySession) stop() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.stopping {
-		s.stopping = true
-		_ = syscall.CancelIoEx(s.handle, &s.overlap)
-	}
-}
-func (d *directoryWatch) Remove(id uint64) {
-	if s := d.sessions[id]; s != nil {
-		s.stop()
-		delete(d.sessions, id)
-		d.retired = append(d.retired, s)
-	}
-}
-func (s *directorySession) run() {
-	defer close(s.done)
-	defer s.file.Close()
-	defer syscall.CloseHandle(s.overlap.HEvent)
-	defer s.pin.Unpin()
-	// Prevent a later Remove/Close from cancelling a recycled HANDLE after
-	// this worker has already failed and released its own directory handle.
-	defer func() { s.mu.Lock(); s.stopping = true; s.mu.Unlock() }()
-	for {
-		var size uint32
-		ok, _, err := watchGetResult.Call(uintptr(s.handle), uintptr(unsafe.Pointer(&s.overlap)), uintptr(unsafe.Pointer(&size)), 1)
-		s.mu.Lock()
-		if s.stopping {
-			s.mu.Unlock()
-			return
-		}
-		if ok == 0 {
-			s.mu.Unlock()
-			if err == syscall.Errno(1022) {
-				err = platform.ErrFileWatchOverflow
-			}
-			s.owner.publish(platform.FileWatchNotice{Target: s.target, Err: err})
-			return
-		}
-		if size == 0 {
-			s.mu.Unlock()
-			s.owner.publish(platform.FileWatchNotice{Target: s.target, Err: platform.ErrFileWatchOverflow})
-			return
-		}
-		if size > 65536 {
-			s.mu.Unlock()
-			s.owner.publish(platform.FileWatchNotice{Target: s.target, Err: errors.New("oversized directory notification")})
-			return
-		}
-		data := unsafe.Slice((*byte)(unsafe.Pointer(&s.storage[0])), int(size))
-		notices, parseErr := parseDirectoryChanges(data, s.target)
-		if parseErr == nil {
-			parseErr = s.arm()
-		}
-		s.mu.Unlock()
-		if parseErr != nil {
-			s.owner.publish(platform.FileWatchNotice{Target: s.target, Err: parseErr})
-			return
-		}
-		for _, n := range notices {
-			s.owner.publish(n)
-		}
-	}
-}
-func (d *directoryWatch) publish(n platform.FileWatchNotice) {
-	select {
-	case d.notices <- n:
-	default:
-		select {
-		case d.lost <- struct{}{}:
-		default:
-		}
-	}
-}
-func (d *directoryWatch) Wait() ([]platform.FileWatchNotice, error) {
-	for i := 0; i < len(d.retired); {
-		select {
-		case <-d.retired[i].done:
-			d.retired = append(d.retired[:i], d.retired[i+1:]...)
-		default:
-			i++
-		}
-	}
-	select {
-	case <-d.wake:
-		return nil, nil
-	case <-d.lost:
-		return nil, platform.ErrFileWatchOverflow
-	case n := <-d.notices:
-		return []platform.FileWatchNotice{n}, nil
-	}
-}
-func (d *directoryWatch) Wake() {
-	select {
-	case d.wake <- struct{}{}:
-	default:
-	}
-}
-func (d *directoryWatch) Close() {
-	for _, s := range d.sessions {
-		s.stop()
-	}
-	for _, s := range d.retired {
-		s.stop()
-	}
-	for _, s := range d.sessions {
-		<-s.done
-	}
-	for _, s := range d.retired {
-		<-s.done
+
+// release closes the handle of s, which cancels its I/O. s stays in
+// sessions until that completes.
+func (d *directoryWatch) release(s *directorySession) {
+	if !s.removed {
+		s.removed = true
+		delete(d.targets, s.target)
+		syscall.CloseHandle(s.handle)
 	}
 }
 
+func (d *directoryWatch) Remove(id uint64) {
+	if s := d.targets[id]; s != nil {
+		d.release(s)
+	}
+}
+
+func (d *directoryWatch) Wait() ([]platform.FileWatchNotice, error) {
+	var size, key uint32
+	var overlap *syscall.Overlapped
+	err := syscall.GetQueuedCompletionStatus(d.port, &size, &key, &overlap, syscall.INFINITE)
+	if overlap == nil {
+		return nil, err // nil for Wake
+	}
+	s := d.sessions[key]
+	if s == nil {
+		return nil, nil
+	}
+	if s.removed {
+		d.finish(s)
+		return nil, nil
+	}
+	var notices []platform.FileWatchNotice
+	switch {
+	case err == errorNotifyEnumDir || err == nil && size == 0:
+		notices = []platform.FileWatchNotice{{Err: platform.ErrFileWatchOverflow}}
+	case err != nil:
+		// ERROR_ACCESS_DENIED once the directory is deleted, for example.
+		d.finish(s)
+		return []platform.FileWatchNotice{{Target: s.target, Kind: platform.FileWatchLost}}, nil
+	default:
+		data := unsafe.Slice((*byte)(unsafe.Pointer(&s.buffer[0])), min(int(size), len(s.buffer)*4))
+		if notices, err = parseDirectoryChanges(data, s.target); err != nil {
+			notices = []platform.FileWatchNotice{{Err: platform.ErrFileWatchOverflow}}
+		}
+	}
+	if err = s.arm(); err != nil {
+		d.finish(s)
+		notices = append(notices, platform.FileWatchNotice{Target: s.target, Kind: platform.FileWatchLost})
+	}
+	return notices, nil
+}
+
+// finish releases s, which has no I/O pending.
+func (d *directoryWatch) finish(s *directorySession) {
+	d.release(s)
+	delete(d.sessions, s.key)
+	s.pin.Unpin()
+}
+
+func (d *directoryWatch) Wake() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.closed {
+		syscall.PostQueuedCompletionStatus(d.port, 0, watchWakeKey, nil)
+	}
+}
+
+func (d *directoryWatch) Close() {
+	d.mu.Lock()
+	d.closed = true
+	d.mu.Unlock()
+	for _, s := range d.sessions {
+		d.release(s)
+	}
+	// Wait for the canceled I/O, which still writes to the sessions.
+	deadline := time.Now().Add(5 * time.Second)
+	for len(d.sessions) > 0 {
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			break
+		}
+		var size, key uint32
+		var overlap *syscall.Overlapped
+		err := syscall.GetQueuedCompletionStatus(d.port, &size, &key, &overlap, uint32(wait/time.Millisecond)+1)
+		if overlap == nil {
+			if err != nil && err != syscall.Errno(syscall.WAIT_TIMEOUT) {
+				break
+			}
+			continue
+		}
+		if s := d.sessions[key]; s != nil {
+			delete(d.sessions, key)
+			s.pin.Unpin()
+		}
+	}
+	if len(d.sessions) > 0 {
+		leakedSessions.Lock()
+		for _, s := range d.sessions {
+			leakedSessions.sessions = append(leakedSessions.sessions, s)
+		}
+		leakedSessions.Unlock()
+	}
+	syscall.CloseHandle(d.port)
+}
+
+// parseDirectoryChanges reads the FILE_NOTIFY_INFORMATION records in data.
+// Names below a subtree's directory are paths, which it separates with
+// slashes.
 func parseDirectoryChanges(data []byte, target uint64) ([]platform.FileWatchNotice, error) {
 	var result []platform.FileWatchNotice
 	for {
@@ -245,7 +281,7 @@ func parseDirectoryChanges(data []byte, target uint64) ([]platform.FileWatchNoti
 				return nil, errors.New("invalid UTF-16 directory notification")
 			}
 		}
-		n := platform.FileWatchNotice{Target: target, Name: string(utf16.Decode(units))}
+		n := platform.FileWatchNotice{Target: target, Name: strings.ReplaceAll(string(utf16.Decode(units)), `\`, "/")}
 		switch action {
 		case 1:
 			n.Kind = platform.FileWatchCreate

@@ -1,5 +1,7 @@
-// Package watch exposes app-approved filesystem watches to MyGo pages.
-// Go and native UI callers use mygo.WatchFiles directly.
+// Package watch is the watch plugin of MyGo: it lets pages watch for
+// changes to files in the directories the app names (see
+// @mygo-plugins/watch). Go code and native UI call mygo.WatchFiles
+// directly.
 package watch
 
 import (
@@ -20,20 +22,28 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 )
 
-// Root is an app-controlled existing directory pages may observe.
+// Root is a directory pages may watch.
 type Root struct {
-	Path      string
+	// Path is the directory's absolute path.
+	Path string
+	// Recursive lets pages watch the directories in it too.
 	Recursive bool
 }
 
-// Options configures page access. Empty Roots denies all watches.
+// Options configures the plugin.
 type Options struct {
-	Roots             map[string]Root
-	Allow             func(context.Context, string) bool
+	// Roots are the directories pages may watch, by the names they use:
+	// lowercase letters, digits and dashes, starting with a letter.
+	Roots map[string]Root
+	// Allow, when set, is asked before each watch with the call's context
+	// and the root's name, and can refuse it.
+	Allow func(ctx context.Context, root string) bool
+	// MaxWatchesPerPage is how many watches a page may have at a time: 8
+	// by default. All pages may have 128.
 	MaxWatchesPerPage int
 }
 
-// Plugin denies all watches. Use New to grant app-controlled root aliases.
+// Plugin is the plugin without roots, which lets pages watch nothing.
 var Plugin = New(Options{})
 
 type watcher interface {
@@ -51,7 +61,8 @@ type service struct {
 	total      int
 }
 
-// New copies the root configuration. Setup validates it without starting a GUI.
+// New returns the plugin with opts. mygo.Use panics when a root is not an
+// absolute path to a directory, after resolving its symlinks.
 func New(opts Options) mygo.Plugin {
 	roots := make(map[string]Root, len(opts.Roots))
 	for k, v := range opts.Roots {
@@ -145,7 +156,9 @@ func codeFor(err error) string {
 	}
 }
 
-// Watch streams only to the authorized calling page for this call's lifetime.
+// Watch watches a root for the calling page, streaming "ready" once
+// everything is watched, then the events, until the page closes parts or
+// goes away. Errors are "watch:<code>:<message>", without paths.
 func (s *service) Watch(ctx context.Context, req request, parts *mygo.Channel[part]) error {
 	return s.run(ctx, req, parts.Send, parts.Close)
 }

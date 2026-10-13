@@ -12,6 +12,10 @@ import (
 	"github.com/egoist/mygo/internal/watchdriver"
 )
 
+// vnodeWatch watches files and directories with kqueue, through a
+// descriptor opened for events only (O_EVTONLY) per target, which doesn't
+// keep a volume from being unmounted. A directory reports that its entries
+// changed but not which, so the core lists it again.
 type vnodeWatch struct {
 	queue  int
 	pipe   [2]int
@@ -21,7 +25,7 @@ type vnodeWatch struct {
 	closed bool
 }
 
-func (*Backend) NewFileWatch(post func(func()) bool, notify func(platform.FileWatchNotice)) (platform.FileWatch, error) {
+func (*Backend) NewFileWatch(notify func(platform.FileWatchNotice)) (platform.FileWatch, error) {
 	q, err := syscall.Kqueue()
 	if err != nil {
 		return nil, err
@@ -44,9 +48,12 @@ func (*Backend) NewFileWatch(post func(func()) bool, notify func(platform.FileWa
 		d.Close()
 		return nil, err
 	}
-	return watchdriver.New(d, post, notify), nil
+	return watchdriver.New(d, notify), nil
 }
 func (d *vnodeWatch) Add(t platform.FileWatchTarget) error {
+	if t.Subtree {
+		return platform.ErrUnsupported
+	}
 	if !t.Directory && !t.Info.Mode().IsRegular() {
 		return nil
 	}
@@ -132,13 +139,11 @@ func (d *vnodeWatch) notice(e syscall.Kevent_t) (platform.FileWatchNotice, bool)
 		return platform.FileWatchNotice{}, false
 	}
 	notice := platform.FileWatchNotice{Target: id}
-	if e.Flags&syscall.EV_ERROR != 0 && e.Data != 0 {
-		notice.Err = syscall.Errno(e.Data)
-	}
-	if e.Fflags&syscall.NOTE_REVOKE != 0 {
-		notice.Err = errors.New("watch target revoked")
-	}
-	if e.Fflags&(syscall.NOTE_WRITE|syscall.NOTE_EXTEND|syscall.NOTE_ATTRIB|syscall.NOTE_LINK) != 0 {
+	switch {
+	case e.Flags&syscall.EV_ERROR != 0 && e.Data != 0, e.Fflags&syscall.NOTE_REVOKE != 0:
+		// The volume went away, or kqueue gave up on the descriptor.
+		notice.Kind = platform.FileWatchLost
+	case e.Fflags&(syscall.NOTE_WRITE|syscall.NOTE_EXTEND|syscall.NOTE_ATTRIB|syscall.NOTE_LINK) != 0:
 		notice.Kind = platform.FileWatchWrite
 	}
 	return notice, true

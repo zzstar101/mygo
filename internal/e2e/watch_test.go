@@ -102,4 +102,37 @@ func TestFileWatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait(mygo.FileCreate, "child/nested")
+	// Directories in the tree can be renamed while it is watched, which
+	// Windows refuses while a handle is open on a directory beneath.
+	if err := os.MkdirAll(filepath.Join(dir, "child", "deeper", "deepest"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	wait(mygo.FileCreate, "child/deeper/deepest")
+	if err := os.Rename(filepath.Join(dir, "child"), filepath.Join(dir, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		e, err := w.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Op == mygo.FileRename && e.OldPath == "child" && e.Path == "moved" {
+			break
+		}
+		if e.Path != "." {
+			t.Fatalf("event %+v", e)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "moved", "deeper", "deepest", "file"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	wait(mygo.FileCreate, "moved/deeper/deepest/file")
+	if err := os.RemoveAll(filepath.Join(dir, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	wait(mygo.FileRemove, "moved")
+	if err := os.WriteFile(filepath.Join(dir, "last"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	wait(mygo.FileCreate, "last")
 }

@@ -5,42 +5,62 @@ import (
 	"io/fs"
 )
 
-// FileWatchTarget identifies an entry selected by core policy. IDs are never reused.
+// FileWatchTarget is a file or directory the core enrolls in a FileWatch.
+// IDs are never reused within a FileWatch.
 type FileWatchTarget struct {
 	ID        uint64
 	Path      string
 	Directory bool
-	Info      fs.FileInfo
+	// Info is what the core's scan saw at Path. Backends open the target
+	// and check it is still the same file, so that a replacement racing
+	// the enrollment is not watched in its place.
+	Info fs.FileInfo
+	// Subtree asks to watch everything beneath the directory with this one
+	// target, and to name what changes deeper down by its slash-separated
+	// path relative to it. A backend that can't returns ErrUnsupported,
+	// and the core enrolls every directory instead.
+	Subtree bool
 }
 
-// FileWatchKind describes a native invalidation hint.
+// FileWatchKind says what changed. Backends report what the system tells
+// them; the core rescans what a notice names, so a kind is only a hint.
 type FileWatchKind uint8
 
 const (
+	// FileWatchDirty means something about the target or its child changed.
 	FileWatchDirty FileWatchKind = iota
 	FileWatchWrite
 	FileWatchCreate
 	FileWatchRemove
 	FileWatchMoveFrom
 	FileWatchMoveTo
+	// FileWatchLost means the system stopped watching the target, for
+	// example because it was deleted; the core enrolls it again if it
+	// still exists.
 	FileWatchLost
 )
 
-// FileWatchNotice invalidates a target or one immediate child.
+// FileWatchNotice reports a change to a target (Name empty) or to one of
+// the immediate children of a directory target (Name its name; a path for
+// a Subtree target). A notice with Err set ends the watch, except
+// ErrFileWatchOverflow, after which the core rescans everything.
 type FileWatchNotice struct {
 	Target uint64
 	Kind   FileWatchKind
 	Name   string
-	Cookie uint64
 	Err    error
 }
 
-// ErrFileWatchOverflow reports native stream loss.
-var ErrFileWatchOverflow = errors.New("file watch native queue overflow")
+// ErrFileWatchOverflow is the Err of a notice when the system dropped
+// changes, for example because its queue overflowed.
+var ErrFileWatchOverflow = errors.New("file watch queue overflow")
 
-// FileWatch methods and callbacks run on main; cleanup never requires dispatch.
+// FileWatch watches the targets the core adds. Its methods may be called
+// from any goroutine, one at a time. Close stops the watch and waits until
+// every handle is released and notify will not be called again; it must
+// not be called from notify.
 type FileWatch interface {
-	Add(target FileWatchTarget, done func(error))
+	Add(target FileWatchTarget) error
 	Remove(id uint64)
-	Close() <-chan struct{}
+	Close()
 }

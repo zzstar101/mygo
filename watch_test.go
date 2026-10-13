@@ -17,24 +17,36 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 )
 
-// Resolve the enrollment by path: Windows enrolls a private parent sentinel
-// before the root, so target IDs are not portable.
+// fileWatchTestNotice reports notice for the target at path, found by
+// path: on Windows the root's parent is enrolled before the root, so IDs
+// differ.
 func fileWatchTestNotice(t *testing.T, w *FileWatcher, path string, notice platform.FileWatchNotice) {
 	t.Helper()
-	found := false
-	onMain(func() {
-		native := w.native.(*fake.FileWatch)
-		for id, target := range native.Targets {
-			if target.Path == filepath.Join(w.root, filepath.FromSlash(path)) {
-				notice.Target = id
-				native.Notify(notice)
-				found = true
-				break
-			}
+	native := w.native.(*fake.FileWatch)
+	for _, target := range native.Targets() {
+		if target.Path == filepath.Join(w.root, filepath.FromSlash(path)) {
+			notice.Target = target.ID
+			native.Notify(notice)
+			return
 		}
-	})
-	if !found {
-		t.Fatalf("no watch target for %q", path)
+	}
+	t.Fatalf("no watch target for %q", path)
+}
+
+// fileWatchTestNext returns the next event that isn't about the root,
+// whose metadata changes along with its entries.
+func fileWatchTestNext(t *testing.T, w *FileWatcher) FileEvent {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for {
+		e, err := w.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Path != "." {
+			return e
+		}
 	}
 }
 
@@ -118,9 +130,7 @@ func TestFileWatchStaleFailureIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	onMain(func() {
-		fb.FileWatches[len(fb.FileWatches)-1].Notify(platform.FileWatchNotice{Target: 99999, Err: errors.New("retired target")})
-	})
+	fb.LastFileWatch().Notify(platform.FileWatchNotice{Target: 99999, Err: errors.New("retired target")})
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	if _, err := w.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -232,6 +242,8 @@ func TestFileWatchRootReplacement(t *testing.T) {
 	}
 }
 
+// An entry replaced or removed between the scan seeing it and the backend
+// enrolling it doesn't stop the watch.
 func TestFileWatchEnrollmentRace(t *testing.T) {
 	for _, recursive := range []bool{false, true} {
 		for _, replace := range []bool{false, true} {
@@ -244,8 +256,6 @@ func TestFileWatchEnrollmentRace(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer w.Close()
-					var native *fake.FileWatch
-					onMain(func() { native = fb.FileWatches[len(fb.FileWatches)-1]; native.DelayAdd = true })
 					path := filepath.Join(dir, "entry")
 					create := func(path string) error {
 						if isDir {
@@ -253,46 +263,31 @@ func TestFileWatchEnrollmentRace(t *testing.T) {
 						}
 						return os.WriteFile(path, []byte("data"), 0600)
 					}
-					if err := create(path); err != nil {
-						t.Fatal(err)
-					}
-					fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{})
-					deadline := time.Now().Add(time.Second)
-					for {
-						found := false
-						onMain(func() {
-							for _, target := range native.Targets {
-								if filepath.Base(target.Path) == "entry" {
-									found = true
-								}
-							}
-						})
-						if found {
-							break
+					raced := false
+					w.native.(*fake.FileWatch).AddHook = func(target platform.FileWatchTarget) error {
+						if target.Path != filepath.Join(w.root, "entry") || raced {
+							return nil
 						}
-						if time.Now().After(deadline) {
-							t.Fatal("scan did not reach delayed Add")
+						raced = true
+						if !replace {
+							return os.Remove(path)
 						}
-						time.Sleep(time.Millisecond)
-					}
-					if replace {
 						replacement := filepath.Join(dir, "replacement")
 						if err := create(replacement); err != nil {
-							t.Fatal(err)
+							return err
 						}
 						if isDir {
 							if err := os.Rename(path, filepath.Join(t.TempDir(), "retired")); err != nil {
-								t.Fatal(err)
+								return err
 							}
 						}
-						if err := os.Rename(replacement, path); err != nil {
-							t.Fatal(err)
-						}
-					} else if err := os.Remove(path); err != nil {
+						return os.Rename(replacement, path)
+					}
+					if err := create(path); err != nil {
 						t.Fatal(err)
 					}
-					onMain(func() { native.DelayAdd = false; native.CompleteAdds(nil) })
-					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Name: "entry", Kind: platform.FileWatchCreate})
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
 					for {
 						e, err := w.Next(ctx)
@@ -303,10 +298,13 @@ func TestFileWatchEnrollmentRace(t *testing.T) {
 							break
 						}
 					}
+					if !raced {
+						t.Fatal("the entry was not enrolled")
+					}
 					if err := os.WriteFile(filepath.Join(dir, "later"), nil, 0600); err != nil {
 						t.Fatal(err)
 					}
-					fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{})
+					fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Name: "later", Kind: platform.FileWatchCreate})
 					for {
 						e, err := w.Next(ctx)
 						if err != nil {
@@ -319,6 +317,160 @@ func TestFileWatchEnrollmentRace(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// A notice for a file looks only at it, and one for a directory only at
+// its entries.
+func TestFileWatchLooksOnlyWhereNotified(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{"a", "b/c", "d/e"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(p)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, p), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	// Changes the watch isn't told about stay unseen.
+	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("unseen"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "d", "f"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b", "c"), []byte("seen"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, "b", platform.FileWatchNotice{Name: "c", Kind: platform.FileWatchWrite})
+	if e := fileWatchTestNext(t, w); e != (FileEvent{Op: FileWrite, Path: "b/c"}) {
+		t.Fatalf("event = %+v", e)
+	}
+	fileWatchTestNotice(t, w, "d", platform.FileWatchNotice{})
+	for {
+		e := fileWatchTestNext(t, w)
+		if e == (FileEvent{Op: FileCreate, Path: "d/f"}) {
+			break
+		}
+		if e.Path != "d" {
+			t.Fatalf("event = %+v", e)
+		}
+	}
+	// Losing changes looks at everything.
+	fb.LastFileWatch().Notify(platform.FileWatchNotice{Err: platform.ErrFileWatchOverflow})
+	if e := fileWatchTestNext(t, w); e != (FileEvent{Op: FileWrite, Path: "a"}) {
+		t.Fatalf("event = %+v", e)
+	}
+}
+
+// A directory renamed is one rename, not one for everything in it.
+func TestFileWatchDirectoryRename(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a", "b", "c"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := os.Rename(filepath.Join(dir, "a"), filepath.Join(dir, "z")); err != nil {
+		t.Fatal(err)
+	}
+	native := w.native.(*fake.FileWatch)
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Name: "a", Kind: platform.FileWatchMoveFrom})
+	if e := fileWatchTestNext(t, w); e != (FileEvent{Op: FileRename, OldPath: "a", Path: "z", IsDir: true}) {
+		t.Fatalf("event = %+v", e)
+	}
+	// Its directories are enrolled again under their new paths.
+	enrolled := map[string]bool{}
+	for _, target := range native.Targets() {
+		enrolled[target.Path] = true
+	}
+	for _, p := range []string{"z", "z/b", "z/b/c"} {
+		if !enrolled[filepath.Join(w.root, filepath.FromSlash(p))] {
+			t.Errorf("%s not enrolled", p)
+		}
+	}
+	if enrolled[filepath.Join(w.root, "a")] {
+		t.Error("a still enrolled")
+	}
+}
+
+// A backend that watches a tree with one target is given only the root,
+// and names what changes below by its path.
+func TestFileWatchSubtree(t *testing.T) {
+	fb.FileWatchSubtree = true
+	defer func() { fb.FileWatchSubtree = false }()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	native := w.native.(*fake.FileWatch)
+	for _, target := range native.Targets() {
+		if target.Path == w.root {
+			if !target.Subtree {
+				t.Error("the root is not a subtree target")
+			}
+		} else if target.Path != filepath.Dir(w.root) {
+			t.Errorf("%s enrolled", target.Path)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b", "c", "d"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Name: "a/b/c", Kind: platform.FileWatchCreate})
+	want := []FileEvent{{Op: FileCreate, Path: "a/b/c", IsDir: true}, {Op: FileCreate, Path: "a/b/c/d", IsDir: true}}
+	for _, want := range want {
+		for {
+			e := fileWatchTestNext(t, w)
+			if e == want {
+				break
+			}
+			if e.Op != FileWrite {
+				t.Fatalf("event = %+v, want %+v", e, want)
+			}
+		}
+	}
+	// The root's target lost enrolls it again and looks at everything.
+	if err := os.WriteFile(filepath.Join(dir, "a", "f"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Kind: platform.FileWatchLost})
+	for {
+		e := fileWatchTestNext(t, w)
+		if e == (FileEvent{Op: FileCreate, Path: "a/f"}) {
+			break
+		}
+		if e.Op != FileWrite {
+			t.Fatalf("event = %+v", e)
+		}
+	}
+	found := false
+	for _, target := range native.Targets() {
+		found = found || target.Path == w.root && target.Subtree
+	}
+	if !found {
+		t.Fatal("the root was not enrolled again")
+	}
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Name: "../x"})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := w.Next(ctx); err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a name out of the tree: %v", err)
 	}
 }
 

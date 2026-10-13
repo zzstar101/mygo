@@ -45,16 +45,18 @@ type Backend struct {
 	prefsReads           int
 	// Watching reports whether power events were asked for, Awake counts the
 	// KeepAwake calls not released yet.
-	// FileWatches records native watch instances; inspect on main.
-	FileWatches []*FileWatch
-	// FileWatchError injects a factory failure.
-	FileWatchError error
-	Watching       bool
-	Awake          int
+	Watching bool
+	Awake    int
 	// Online and Constrained are what Network.Status answers with, and
 	// WatchingNetwork whether Network.Watch was called.
 	Online, Constrained bool
 	WatchingNetwork     bool
+	// FileWatches are the file watches made, FileWatchError what making
+	// one fails with, and FileWatchSubtree whether they take Subtree
+	// targets.
+	FileWatches      []*FileWatch
+	FileWatchError   error
+	FileWatchSubtree bool
 	// URLSchemes are the registered URL schemes, by scheme: "id name".
 	URLSchemes map[string]string
 	// LoginItem is the command that starts the app at login: "id name arg".

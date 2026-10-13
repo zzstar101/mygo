@@ -7,78 +7,92 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/egoist/mygo/internal/platform"
 )
 
-// FileOp describes a coalesced change, not a count of native operations.
+// FileOp is the kind of a FileEvent.
 type FileOp string
 
 const (
-	// FileCreate means a path appeared in the watched directory.
+	// FileCreate is a file or directory that appeared.
 	FileCreate FileOp = "create"
-	// FileWrite means data or metadata at a path may have changed.
+	// FileWrite is a file or directory whose content or metadata may have
+	// changed.
 	FileWrite FileOp = "write"
-	// FileRemove means a path disappeared from the watched directory.
+	// FileRemove is a file or directory that went away.
 	FileRemove FileOp = "remove"
-	// FileRename means a rename within the watched directory was identified.
+	// FileRename is a file or directory that moved within the watched
+	// directory.
 	FileRename FileOp = "rename"
 )
 
-// FileEvent describes a change relative to the watched directory. Paths use
-// slash separators; "." identifies the root. Events are invalidation hints,
-// not a complete or ordered filesystem journal.
+// FileEvent is a change in a watched directory. A watch compares what it
+// sees with what it saw before, so events say what is different, not every
+// step that made it so: a file written twice in a row is one write, and
+// one created and removed in between is nothing. Treat them as hints to
+// read the files again.
 type FileEvent struct {
-	Op   FileOp `json:"op"`
+	Op FileOp `json:"op"`
+	// Path is the path relative to the watched directory, separated by
+	// slashes; "." is the directory itself.
 	Path string `json:"path"`
-	// OldPath is set only for FileRename; Path is its new name.
+	// OldPath is where a FileRename moved from.
 	OldPath string `json:"oldPath,omitzero"`
-	// IsDir reports the kind observed before removal or after creation.
+	// IsDir reports whether it is a directory, as it was before a
+	// FileRemove.
 	IsDir bool `json:"isDir"`
 }
 
-// FileWatchOptions configures a watch. Zero values select useful defaults.
+// FileWatchOptions configures WatchFiles. The zero value watches a
+// directory without the directories in it.
 type FileWatchOptions struct {
-	// Recursive watches descendants too, without following symlinks.
+	// Recursive watches the directories in the directory too.
 	Recursive bool
-	// Debounce is the quiet period: 50 ms by default; negative disables it.
+	// Debounce is how long a watch waits for changes to stop before it
+	// reports them: 50 ms by default. Negative reports them right away.
 	Debounce time.Duration
-	// MaxDelay bounds the debounce timer: 500 ms by default, at least Debounce.
+	// MaxDelay is the longest changes wait while more keep coming: 500 ms
+	// by default. It can't be shorter than Debounce.
 	MaxDelay time.Duration
-	// Buffer bounds queued public events: 1024 by default.
+	// Buffer is how many events wait for Next before the watch stops with
+	// ErrWatchOverflow: 1024 by default.
 	Buffer int
-	// MaxEntries bounds the snapshot and native targets: 8192 by default.
+	// MaxEntries is how many files and directories a watch covers before
+	// it stops with ErrWatchLimit: 8192 by default.
 	MaxEntries int
 }
 
-// ErrWatchOverflow means changes were lost. Re-read state and start a new watch.
+// ErrWatchOverflow is what a watch stops with when more events waited for
+// Next than FileWatchOptions.Buffer. Read the files again and start a new
+// watch.
 var ErrWatchOverflow = errors.New("mygo: file watch overflow")
 
-// ErrWatchLimit means the configured entry limit was exceeded.
+// ErrWatchLimit is what a watch stops with when its directory has more
+// than FileWatchOptions.MaxEntries files and directories.
 var ErrWatchLimit = errors.New("mygo: file watch entry limit exceeded")
 
-// FileWatcher owns an event stream and its native resources. Methods are safe
-// from any goroutine. Use one logical Next consumer. Obtain it from WatchFiles;
-// its zero value is not usable.
+// FileWatcher is a watch WatchFiles started. Its methods are safe from any
+// goroutine.
 type FileWatcher struct {
-	mu            sync.Mutex
-	events        []FileEvent
-	waiters       []*fileWaiter
-	stopped       bool
-	err           error
-	done          chan struct{}
-	ctx           context.Context
-	cancel        context.CancelFunc
-	native        platform.FileWatch // main-thread only
-	nativeClosing bool               // main-thread only
-	nativeDone    chan (<-chan struct{})
-	raw           chan platform.FileWatchNotice
-	overflow      chan struct{}
-	root          string
-	opts          FileWatchOptions
+	mu      sync.Mutex
+	events  []FileEvent
+	waiters []*fileWaiter
+	stopped bool
+	err     error
+	done    chan struct{}
+	ctx     context.Context
+	cancel  context.CancelFunc
+	// native is the backend's watch, which only the goroutine of the
+	// watch uses; what it reports goes through raw, and overflow says raw
+	// was full.
+	native   platform.FileWatch
+	raw      chan platform.FileWatchNotice
+	overflow chan struct{}
+	root     string
+	opts     FileWatchOptions
 }
 type fileResult struct {
 	event FileEvent
@@ -92,10 +106,13 @@ var fileWatches = struct {
 	active  map[*FileWatcher]bool
 }{active: make(map[*FileWatcher]bool)}
 
-// WatchFiles watches an existing directory without traversing descendant
-// symlinks or reparse points. It requires a running app. It returns after
-// enumeration and native registration; initial contents are not emitted.
-// The lifetime context cancels the watch. On main, setup pumps native events.
+// WatchFiles watches the directory at path, and with opts.Recursive the
+// directories in it, but not those that symlinks or Windows junctions
+// point to. It returns once everything is watched; what is already there
+// is not reported. Canceling ctx stops the watch, as Close does.
+//
+// It can be called from any goroutine, and on the main thread once the app
+// runs. The app stops its watches when it quits.
 func WatchFiles(ctx context.Context, path string, opts FileWatchOptions) (*FileWatcher, error) {
 	needsApp("WatchFiles")
 	if ctx == nil {
@@ -137,47 +154,45 @@ func WatchFiles(ctx context.Context, path string, opts FileWatchOptions) (*FileW
 		return nil, err
 	}
 	life, cancel := context.WithCancel(ctx)
-	w := &FileWatcher{ctx: life, cancel: cancel, root: root, opts: opts, done: make(chan struct{}), nativeDone: make(chan (<-chan struct{}), 1), raw: make(chan platform.FileWatchNotice, 4096), overflow: make(chan struct{}, 1)}
-	ready := make(chan error, 1)
-	start := func() {
-		fileWatches.Lock()
-		if fileWatches.stopped {
-			fileWatches.Unlock()
-			cancel()
-			deliver(ready, errLoopStopped)
-			return
-		}
-		fileWatches.active[w] = true
+	w := &FileWatcher{ctx: life, cancel: cancel, root: root, opts: opts, done: make(chan struct{}), raw: make(chan platform.FileWatchNotice, 4096), overflow: make(chan struct{}, 1)}
+	fileWatches.Lock()
+	if fileWatches.stopped {
 		fileWatches.Unlock()
-		n, e := backend().NewFileWatch(postMain, w.notice)
-		if e != nil {
-			fileWatches.Lock()
-			delete(fileWatches.active, w)
-			fileWatches.Unlock()
-			cancel()
-			deliver(ready, fmt.Errorf("mygo: watch: %w", e))
-			return
-		}
-		w.native = n
-		go w.run(ready)
-	}
-	if isMainThread() {
-		start()
-	} else if !postMain(start) {
 		cancel()
 		return nil, errLoopStopped
 	}
+	fileWatches.active[w] = true
+	fileWatches.Unlock()
+	if w.native, err = backend().NewFileWatch(w.notice); err != nil {
+		fileWatches.Lock()
+		delete(fileWatches.active, w)
+		fileWatches.Unlock()
+		cancel()
+		return nil, fmt.Errorf("mygo: watch: %w", err)
+	}
+	ready := make(chan error, 1)
+	go w.run(ready)
 	if err := await(ready); err != nil {
 		return nil, err
 	}
 	return w, nil
 }
 
+// notice is what the backend reports to, on its goroutine. When raw is
+// full the watch looks at everything again instead.
 func (w *FileWatcher) notice(n platform.FileWatchNotice) {
 	select {
 	case <-w.ctx.Done():
 		return
 	default:
+	}
+	if n.Err != nil && !errors.Is(n.Err, platform.ErrFileWatchOverflow) {
+		// An error stops the watch, so it waits its turn.
+		select {
+		case w.raw <- n:
+		case <-w.ctx.Done():
+		}
+		return
 	}
 	select {
 	case w.raw <- n:
@@ -189,8 +204,10 @@ func (w *FileWatcher) notice(n platform.FileWatchNotice) {
 	}
 }
 
-// Next returns the next change, EOF after clean close, or the terminal error.
-// Canceling ctx cancels this wait, not the watch. Main-thread waits pump events.
+// Next waits for the next change. It returns io.EOF once the watch is
+// closed, or the error that stopped it. Canceling ctx cancels the wait,
+// not the watch. On the main thread it keeps processing events while it
+// waits.
 func (w *FileWatcher) Next(ctx context.Context) (FileEvent, error) {
 	if ctx == nil {
 		return FileEvent{}, errors.New("mygo: nil wait context")
@@ -237,15 +254,15 @@ func (w *FileWatcher) Next(ctx context.Context) (FileEvent, error) {
 	return r.event, r.err
 }
 
-// Close immediately stops delivery and requests cleanup without waiting for
-// worker I/O or UI dispatch. It is idempotent and discards queued events.
+// Close stops the watch and drops the changes not yet returned by Next. It
+// doesn't wait for the watch to release what it holds; Done does.
 func (w *FileWatcher) Close() { w.stop(nil, true) }
 
-// Done closes after all descriptors, handles and workers have been released.
-// Never wait directly on Done on the UI thread.
+// Done is closed once the watch has stopped and released its handles.
 func (w *FileWatcher) Done() <-chan struct{} { return w.done }
 
-// Err returns the terminal failure, or nil while active or after explicit Close.
+// Err returns the error that stopped the watch, or nil if it is still
+// running or was closed.
 func (w *FileWatcher) Err() error { w.mu.Lock(); defer w.mu.Unlock(); return w.err }
 
 func (w *FileWatcher) stop(err error, discard bool) {
@@ -255,9 +272,6 @@ func (w *FileWatcher) stop(err error, discard bool) {
 			w.events = nil
 		}
 		w.mu.Unlock()
-		if isMainThread() {
-			w.closeNative()
-		}
 		return
 	}
 	w.stopped = true
@@ -275,18 +289,6 @@ func (w *FileWatcher) stop(err error, discard bool) {
 		deliver(waiter.result, fileResult{err: err})
 	}
 	w.cancel()
-	if isMainThread() {
-		w.closeNative()
-	} else {
-		postMain(w.closeNative)
-	}
-}
-
-func (w *FileWatcher) closeNative() {
-	if !w.nativeClosing {
-		w.nativeClosing = true
-		w.nativeDone <- w.native.Close()
-	}
 }
 
 func (w *FileWatcher) emit(events []FileEvent) error {
@@ -330,7 +332,6 @@ func stopFileWatches() {
 		all = append(all, w)
 	}
 	fileWatches.Unlock()
-	// Close executes on main before waiting. All worker waits select cancellation.
 	for _, w := range all {
 		w.Close()
 	}
@@ -339,119 +340,82 @@ func stopFileWatches() {
 	}
 }
 
+// run is the goroutine of the watch: it enrolls the tree, then waits for
+// what the backend reports and, once nothing more came for opts.Debounce
+// (or opts.MaxDelay passed), looks at it.
 func (w *FileWatcher) run(ready chan error) {
 	var terminal error
+	scan := newFileWatchScan(w)
 	defer func() {
 		w.stop(terminal, errors.Is(terminal, ErrWatchOverflow) || errors.Is(terminal, ErrWatchLimit))
-		<-(<-w.nativeDone)
+		scan.close()
+		w.native.Close()
 		fileWatches.Lock()
 		delete(fileWatches.active, w)
 		fileWatches.Unlock()
 		close(w.done)
 	}()
-	scan := newFileWatchScan(w)
-	defer scan.close()
-	before, err := scan.scan()
+	events, err := scan.start()
+	if err == nil {
+		err = w.emit(events)
+	}
 	if err != nil {
 		terminal = err
 		deliver(ready, err)
 		return
 	}
-	// Initial contents are not events, but changes observed while enrolling are.
-	if err := w.emit(fileWatchDiff(before, before, scan.races)); err != nil {
-		terminal = err
-		deliver(ready, err)
-		return
-	}
 	deliver(ready, nil)
-	writes := make(map[string]bool)
 	var timer *time.Timer
 	var timerC <-chan time.Time
 	var first time.Time
-	dirty := false
 	defer func() {
 		if timer != nil {
 			timer.Stop()
 		}
 	}()
+	schedule := func() {
+		if timerC == nil {
+			first = time.Now()
+		}
+		delay := min(w.opts.Debounce, time.Until(first.Add(w.opts.MaxDelay)))
+		if timer == nil {
+			timer = time.NewTimer(delay)
+		} else {
+			timer.Reset(delay)
+		}
+		timerC = timer.C
+	}
 	for {
 		select {
 		case <-w.ctx.Done():
 			terminal = w.ctx.Err()
 			return
 		case <-w.overflow:
-			terminal = ErrWatchOverflow
-			return
+			scan.all = true
+			schedule()
 		case n := <-w.raw:
-			path, ok := scan.ids[n.Target]
-			if !ok && n.Target != 0 {
-				continue
-			}
-			if n.Err != nil {
-				terminal = n.Err
-				if errors.Is(n.Err, platform.ErrFileWatchOverflow) {
-					terminal = ErrWatchOverflow
-				}
+			if err := scan.mark(n); err != nil {
+				terminal = err
 				return
 			}
-			if path == ".." {
-				if n.Name != filepath.Base(w.root) {
-					continue
-				}
-				path = "."
-				n.Name = ""
+			if scan.pending() {
+				schedule()
 			}
-			if n.Name != "" {
-				if n.Name == "." || n.Name == ".." || strings.ContainsAny(n.Name, "/\x00") || strings.ContainsRune(n.Name, filepath.Separator) {
-					terminal = errors.New("mygo: invalid native watch name")
-					return
-				}
-				path = filepath.ToSlash(filepath.Join(path, n.Name))
-			}
-			if n.Kind == platform.FileWatchWrite {
-				writes[path] = true
-				if len(writes) > w.opts.MaxEntries {
-					terminal = ErrWatchOverflow
-					return
-				}
-			}
-			now := time.Now()
-			if !dirty {
-				first = now
-				dirty = true
-			}
-			delay := w.opts.Debounce
-			if remaining := time.Until(first.Add(w.opts.MaxDelay)); remaining < delay {
-				delay = remaining
-			}
-			if timer == nil {
-				timer = time.NewTimer(delay)
-			} else {
-				timer.Reset(delay)
-			}
-			timerC = timer.C
 		case <-timerC:
 			timerC = nil
-			dirty = false
-			after, e := scan.scan()
-			if e != nil {
-				terminal = e
-				rootInfo, rootErr := os.Lstat(w.root)
-				if errors.Is(rootErr, os.ErrNotExist) || rootErr == nil && !os.SameFile(rootInfo, scan.identity) {
-					if emitErr := w.emit([]FileEvent{{Op: FileRemove, Path: ".", IsDir: true}}); emitErr != nil {
-						terminal = emitErr
+			events, err := scan.update()
+			if err != nil {
+				terminal = err
+				info, statErr := os.Lstat(w.root)
+				if errors.Is(statErr, os.ErrNotExist) || statErr == nil && !os.SameFile(info, scan.identity) {
+					if err := w.emit([]FileEvent{{Op: FileRemove, Path: ".", IsDir: true}}); err != nil {
+						terminal = err
 					}
 				}
 				return
 			}
-			for path := range scan.races {
-				writes[path] = true
-			}
-			events := fileWatchDiff(before, after, writes)
-			before = after
-			clear(writes)
-			if e = w.emit(events); e != nil {
-				terminal = e
+			if err = w.emit(events); err != nil {
+				terminal = err
 				return
 			}
 		}

@@ -309,28 +309,47 @@ while Linux and Windows let them read. Linux needs libsecret (the
 `libsecret-1-0` package on Debian and Ubuntu) and a running Secret
 Service; without them the methods return an error.
 
-## File watching
+## Watching files
 
-Watch existing directories directly from Go, without registering a plugin.
-Start after `App.Run` initializes the app; prefer a goroutine for long waits:
+`mygo.WatchFiles` watches a directory, and with `Recursive` the
+directories in it, for changes to the files in it. It returns once
+everything is watched, and `Next` waits for each change; use it on a
+goroutine of its own:
 
 ```go
+w, err := mygo.WatchFiles(ctx, dir, mygo.FileWatchOptions{Recursive: true})
+if err != nil {
+	return err
+}
 go func() {
-    w, err := mygo.WatchFiles(ctx, directory, mygo.FileWatchOptions{Recursive: true})
-    if err != nil { log.Print(err); return }
-    defer w.Close()
-    for {
-        event, err := w.Next(ctx)
-        if err != nil { return }
-        log.Print(event.Op, " ", event.Path)
-    }
+	defer w.Close()
+	for {
+		event, err := w.Next(ctx)
+		if err != nil {
+			return // io.EOF once closed
+		}
+		log.Println(event.Op, event.Path)
+	}
 }()
 ```
 
-Events are root-relative invalidation hints, not a complete journal. `Close`
-is nonblocking; `Done` reports released resources. Overflow requires re-reading
-state and opening a new watch. See [Watch](plugins/watch.md) for coalescing,
-limits, platform differences, and optional page access through root aliases.
+An event's `Path` is relative to the directory and separated by slashes,
+`.` for the directory itself, and `Op` is `mygo.FileCreate`, `FileWrite`,
+`FileRemove` or `FileRename`, with `OldPath` where a rename moved from.
+What is already there is not reported. Changes wait for 50 ms of quiet
+(`Debounce`) before they are reported, and never more than 500 ms
+(`MaxDelay`). A watch compares what it sees with what it saw, so events say
+what is different, not every step that made it so: treat them as hints to
+read the files again.
+
+Canceling the context given to `WatchFiles`, or `Close`, stops the watch;
+`Done` is closed once it has released its handles, and the app stops its
+watches when it quits. A watch stops with `mygo.ErrWatchOverflow` when more
+than 1024 events (`Buffer`) waited for `Next`, after which read the files
+again and start a new one, and with `mygo.ErrWatchLimit` when the directory
+has more than 8192 files and directories (`MaxEntries`). The
+[watch plugin](plugins/watch.md) gives pages watches of the directories an
+app chooses, and says how each platform watches.
 
 ## Global shortcuts
 
