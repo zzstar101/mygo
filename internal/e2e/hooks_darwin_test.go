@@ -77,6 +77,11 @@ func webViewAttached(w *mygo.Window) (attached bool, supported bool) {
 	return attached, true
 }
 
+func collectionBehavior(w *mygo.Window) (behavior uint, supported bool) {
+	mygo.RunOnMain(func() { behavior = darwin.TestCollectionBehavior(w.NativeHandle()) })
+	return behavior, true
+}
+
 func dockDevTools(w *mygo.Window) (ok bool) {
 	mygo.RunOnMain(func() { ok = darwin.TestDockInspector(w.NativeHandle()) })
 	return ok
@@ -146,6 +151,8 @@ func titleButtons(*mygo.Window) ([]string, bool) { return nil, false }
 func pressTitleButton(*mygo.Window, string) bool { return false }
 
 func topNonClient(*mygo.Window) (int32, int32, bool) { return 0, 0, false }
+
+func menuBarColors(*mygo.Window) (uint32, uint32, bool) { return 0, 0, false }
 
 func titleButtonColor(*mygo.Window, string) (uint8, uint8, uint8, bool) { return 0, 0, 0, false }
 

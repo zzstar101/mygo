@@ -462,6 +462,29 @@ func (s *System) RegisterFont(data []byte, family string) error {
 	return nil
 }
 
+// FontFamilies lists the families text can use, the app's registered
+// ones first, then the system's, each once and sorted: the monospaced
+// ones only when mono.
+func (s *System) FontFamilies(mono bool) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	app, system := s.engine().families(mono)
+	seen := map[string]bool{}
+	unique := func(names []string) []string {
+		var out []string
+		for _, f := range names {
+			if key := strings.ToLower(f); !seen[key] {
+				seen[key] = true
+				out = append(out, f)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	app = unique(app)
+	return append(app, unique(system)...)
+}
+
 // Preload starts the text engine and finds the system UI font, which the
 // first layout otherwise waits for.
 func (s *System) Preload() {

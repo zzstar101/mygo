@@ -85,6 +85,8 @@ type Backend interface {
 	Screen() Screen
 	Theme() Theme
 	Power() Power
+	// Secrets may be called before Init, from any goroutine.
+	Secrets() Secrets
 
 	NewTray(h TrayHandler) (Tray, error)
 	RegisterHotkey(id int, accelerator string) error
@@ -798,6 +800,26 @@ type Power interface {
 	KeepAwake(display bool, reason string) (release func())
 	OnBattery() bool
 	IdleTime() time.Duration
+}
+
+// ErrSecretNotFound is what Secrets.Secret fails with when the store has
+// no secret for the service and account.
+var ErrSecretNotFound = errors.New("mygo: secret not found")
+
+// Secrets keeps small secrets in the system's credential store: the
+// Keychain on macOS, the Secret Service on Linux (through libsecret) and
+// the Credential Manager on Windows. A secret is identified by a service,
+// the app, and an account, its key, as Electron's keytar stores them.
+//
+// Unlike other platform methods these may be called from any goroutine,
+// and they may block while the system asks the user, e.g. to unlock the
+// keyring: the core never calls them on the main thread of a running app.
+type Secrets interface {
+	SetSecret(service, account string, secret []byte) error
+	// Secret fails with ErrSecretNotFound when there is none.
+	Secret(service, account string) ([]byte, error)
+	// DeleteSecret succeeds when there is no secret to delete.
+	DeleteSecret(service, account string) error
 }
 
 // TrayHandler receives tray icon events.

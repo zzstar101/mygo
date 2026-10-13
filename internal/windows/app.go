@@ -133,6 +133,7 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	}
 	b.taskbarCreated = registerWindowMessage("TaskbarCreated")
 	b.taskbarButtonCreated = registerWindowMessage("TaskbarButtonCreated")
+	b.applyMenuTheme() // for the menus of trays too, before any window
 	// Clipboard and drag/drop share startup-created OLE callback tables.
 	dropOnce.Do(initDropTarget)
 	return nil

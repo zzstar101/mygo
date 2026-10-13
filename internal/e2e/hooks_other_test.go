@@ -34,6 +34,9 @@ func sideButton(*mygo.Window, bool) bool { return false }
 
 func webViewAttached(*mygo.Window) (bool, bool) { return false, false }
 
+// Collection behaviors are macOS's.
+func collectionBehavior(*mygo.Window) (uint, bool) { return 0, false }
+
 func dockDevTools(*mygo.Window) bool { return false }
 
 func dockedDevToolsPlace(*mygo.Window) string { return "" }
@@ -78,6 +81,8 @@ func titleButtons(*mygo.Window) ([]string, bool) { return nil, false }
 func pressTitleButton(*mygo.Window, string) bool { return false }
 
 func topNonClient(*mygo.Window) (int32, int32, bool) { return 0, 0, false }
+
+func menuBarColors(*mygo.Window) (uint32, uint32, bool) { return 0, 0, false }
 
 func titleButtonColor(*mygo.Window, string) (uint8, uint8, uint8, bool) { return 0, 0, 0, false }
 

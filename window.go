@@ -950,7 +950,10 @@ func (w *Window) SetSkipTaskbar(v bool) {
 }
 
 // SetVisibleOnAllWorkspaces shows the window on every workspace (macOS
-// Spaces, Linux virtual desktops), or on the current one only.
+// Spaces, Linux virtual desktops), or on the current one only. On macOS it
+// also shows over other apps in full screen, even with DisableFullScreen,
+// if the app is an accessory (ActivationPolicyAccessory, Dock.Hide): macOS
+// shows no windows of regular apps there.
 func (w *Window) SetVisibleOnAllWorkspaces(v bool) {
 	w.do(func(n platform.Window) { n.SetVisibleOnAllWorkspaces(v) })
 }

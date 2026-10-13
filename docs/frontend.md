@@ -106,6 +106,16 @@ falling back to `index.html` like the frontend. Handling the `mygo` scheme
 replaces the frontend with your handler. Pages of custom schemes are the
 app's own: they may call Go methods.
 
+Each scheme is its own origin, so a page fetching another scheme makes a
+cross-origin request: the frontend reading `api://localhost/`, or, during
+`mygo dev`, the dev server reading `thumbs://localhost/`. Responses to the
+app's own pages, those that may call Go methods, carry the CORS headers
+that let them read the response, and MyGo answers their preflights.
+Other sites get none, unless the window trusts them
+(`PageOptions.TrustedOrigins`), and handlers may set their own.
+On Windows, fetch a scheme at `http://<scheme>.localhost/`, where
+WebView2 serves it.
+
 ## The mygo-runtime package
 
 MyGo injects its runtime into every page as `window.mygo`. The

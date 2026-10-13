@@ -1108,6 +1108,102 @@ func TestProtocol(t *testing.T) {
 	}
 }
 
+// Pages of the app are other origins than the custom schemes they fetch:
+// responses carry CORS headers for them, and for them only.
+func TestProtocolCORS(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/data", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Count", "3")
+		fmt.Fprint(w, "data")
+	})
+	mux.HandleFunc("/own", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "https://cdn.example.com")
+	})
+	if err := Protocol.Handle("assets", mux); err != nil {
+		t.Fatal(err)
+	}
+	defer Protocol.Unhandle("assets")
+	defer func(v bool) { schemeHosts = v }(schemeHosts)
+	schemeHosts = true // as on Windows
+	_, fw := testWindow(t, WindowOptions{Page: PageOptions{TrustedOrigins: []string{"https://app.example.com"}}})
+
+	send := func(method, path, origin string, extra http.Header) *recorder {
+		t.Helper()
+		rec := &recorder{finished: make(chan struct{})}
+		h := http.Header{}
+		if origin != "" {
+			h.Set("Origin", origin)
+		}
+		for k, v := range extra {
+			h[k] = v
+		}
+		req := &platform.SchemeRequest{Context: context.Background(), Method: method, URL: "assets://localhost" + path, Header: h, Responder: rec}
+		onMain(func() { fw.H.SchemeRequest(req) })
+		select {
+		case <-rec.finished:
+		case <-time.After(3 * time.Second):
+			t.Fatal("request did not finish")
+		}
+		return rec
+	}
+
+	for _, origin := range []string{
+		"mygo://localhost",        // the frontend
+		"http://mygo.localhost",   // the frontend, as WebView2 serves it
+		"http://assets.localhost", // a custom scheme, as WebView2 serves it
+		"https://app.example.com", // in PageOptions.TrustedOrigins
+	} {
+		rec := send("GET", "/data", origin, nil)
+		if rec.status != 200 || rec.body.String() != "data" {
+			t.Errorf("%s: %d %q", origin, rec.status, rec.body.String())
+		}
+		if got := rec.header.Get("Access-Control-Allow-Origin"); got != origin {
+			t.Errorf("%s: Access-Control-Allow-Origin = %q", origin, got)
+		}
+		if rec.header.Get("Access-Control-Expose-Headers") != "*" || rec.header.Get("Vary") != "Origin" {
+			t.Errorf("%s: headers %v", origin, rec.header)
+		}
+	}
+	if IsDev() {
+		// Development builds trust pages served from localhost: the dev server.
+		if got := send("GET", "/data", "http://localhost:5173", nil).header.Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+			t.Errorf("dev server: Access-Control-Allow-Origin = %q", got)
+		}
+	}
+	for _, origin := range []string{"", "null", "https://example.com", "http://evil.localhost", "http://assets.localhost:8080"} {
+		if got := send("GET", "/data", origin, nil).header.Get("Access-Control-Allow-Origin"); got != "" {
+			t.Errorf("%q got Access-Control-Allow-Origin %q", origin, got)
+		}
+	}
+
+	// Elsewhere, http://<scheme>.localhost is a server on the loopback
+	// interface, not the app.
+	schemeHosts = false
+	if got := send("GET", "/data", "http://mygo.localhost", nil).header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("http://mygo.localhost outside Windows got Access-Control-Allow-Origin %q", got)
+	}
+	schemeHosts = true
+
+	// A preflight is answered for the app's pages, not passed to the handler.
+	rec := send("OPTIONS", "/data", "http://mygo.localhost", http.Header{
+		"Access-Control-Request-Method":  {"POST"},
+		"Access-Control-Request-Headers": {"content-type"},
+	})
+	if rec.status != http.StatusNoContent || rec.body.String() != "" ||
+		rec.header.Get("Access-Control-Allow-Methods") != "POST" ||
+		rec.header.Get("Access-Control-Allow-Headers") != "content-type" {
+		t.Errorf("preflight: %d %q %v", rec.status, rec.body.String(), rec.header)
+	}
+	if rec := send("OPTIONS", "/data", "https://example.com", http.Header{"Access-Control-Request-Method": {"POST"}}); rec.status == http.StatusNoContent {
+		t.Error("a preflight from another site was answered")
+	}
+
+	// A handler's own CORS headers win.
+	if got := send("GET", "/own", "mygo://localhost", nil).header.Get("Access-Control-Allow-Origin"); got != "https://cdn.example.com" {
+		t.Errorf("handler's header overridden: %q", got)
+	}
+}
+
 // bodyRecorder takes the body from the goroutine serving the request, as
 // the Linux backend does.
 type bodyRecorder struct {

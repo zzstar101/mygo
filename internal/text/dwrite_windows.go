@@ -73,6 +73,7 @@ var (
 	iidIDWriteFactory       = guid{0xb859ee5a, 0xd838, 0x4b5b, [8]byte{0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48}}
 	iidIDWriteFactory2      = guid{0x0439fc60, 0xca44, 0x4994, [8]byte{0x8d, 0xee, 0x3a, 0x9a, 0xf7, 0xb7, 0x32, 0xec}}
 	iidIDWriteFactory5      = guid{0x958db99a, 0xbe2a, 0x4f09, [8]byte{0xaf, 0x7d, 0x65, 0x18, 0x98, 0x03, 0xd1, 0xd3}}
+	iidIDWriteFont1         = guid{0xacd16696, 0x8c14, 0x4f5d, [8]byte{0x87, 0x7e, 0xfe, 0x3f, 0xc1, 0xd3, 0x27, 0x38}}
 	iidIDWriteFontFace2     = guid{0xd8b768ff, 0x64bc, 0x4e66, [8]byte{0x98, 0x2b, 0xec, 0x8e, 0x87, 0xf6, 0x93, 0xf7}}
 	iidIDWriteFontFace3     = guid{0xd37d7598, 0x09be, 0x4222, [8]byte{0xa2, 0x36, 0x20, 0x81, 0x34, 0x1c, 0xc1, 0xf2}}
 	iidIDWriteFactory3      = guid{0x9a1b41c3, 0xd3bb, 0x466a, [8]byte{0x87, 0xfc, 0xfe, 0x67, 0x55, 0x6a, 0x3b, 0x65}}
@@ -125,6 +126,8 @@ const (
 	// IDWriteFont
 	fontGetFontFamily  = 3
 	fontCreateFontFace = 13
+	// IDWriteFont1
+	font1IsMonospacedFont = 17
 	// IDWriteFontFace
 	faceGetMetrics = 8
 	// IDWriteFontFace2
@@ -369,11 +372,13 @@ type dwrite struct {
 	aliased      bool
 
 	// The fonts the app registers: their files, a collection of them,
-	// and the family name of each name they are registered under.
+	// the family name of each name they are registered under, and those
+	// names as the app gave them.
 	loader  uintptr
 	files   []uintptr
 	custom  uintptr
 	aliases map[string]string
+	names   []string
 
 	scratch []byte
 }
@@ -1354,8 +1359,10 @@ func (e *dwrite) register(data []byte, family string) error {
 	for _, name := range names {
 		e.aliases[strings.ToLower(name)] = name
 	}
+	e.names = append(e.names, names...)
 	if family != "" {
 		e.aliases[strings.ToLower(family)] = names[0]
+		e.names = append(e.names, family)
 	}
 	for k, f := range e.formats {
 		if k.custom {
@@ -1393,8 +1400,28 @@ func (e *dwrite) newCollection(files []uintptr) (uintptr, error) {
 	return coll, nil
 }
 
+// families lists the app's families and the system's, the monospaced
+// ones when mono: those whose regular font IDWriteFont1 (Windows 8 and
+// later) calls so.
+func (e *dwrite) families(mono bool) (app, system []string) {
+	var fixed []string // the app's monospaced families
+	if mono && e.custom != 0 {
+		fixed = collectionFamilies(e.custom, true)
+	}
+	for _, name := range e.names {
+		if !mono || slices.Contains(fixed, e.aliases[strings.ToLower(name)]) {
+			app = append(app, name)
+		}
+	}
+	return app, collectionFamilies(e.system, mono)
+}
+
 // familyNames returns the English names of a collection's families.
-func familyNames(coll uintptr) []string {
+func familyNames(coll uintptr) []string { return collectionFamilies(coll, false) }
+
+// collectionFamilies returns the English names of a collection's
+// families, only the monospaced ones when mono.
+func collectionFamilies(coll uintptr, mono bool) []string {
 	var names []string
 	n := uint32(call(coll, collectionGetFontFamilyCount))
 	for i := range n {
@@ -1402,7 +1429,7 @@ func familyNames(coll uintptr) []string {
 		if failed(call(coll, collectionGetFontFamily, uintptr(i), uintptr(unsafe.Pointer(&fam)))) {
 			continue
 		}
-		if !failed(call(fam, familyGetFamilyNames, uintptr(unsafe.Pointer(&strs)))) {
+		if (!mono || monospaced(fam)) && !failed(call(fam, familyGetFamilyNames, uintptr(unsafe.Pointer(&strs)))) {
 			if name := englishName(strs); name != "" {
 				names = append(names, name)
 			}
@@ -1411,6 +1438,21 @@ func familyNames(coll uintptr) []string {
 		release(fam)
 	}
 	return names
+}
+
+// monospaced reports whether a family's regular font is monospaced.
+func monospaced(fam uintptr) bool {
+	var font uintptr
+	if failed(call(fam, familyGetFirstMatchingFont, 400, fontStretchNormal, dwStyle(false), uintptr(unsafe.Pointer(&font)))) {
+		return false
+	}
+	defer release(font)
+	font1 := queryInterface(font, &iidIDWriteFont1)
+	if font1 == 0 {
+		return false
+	}
+	defer release(font1)
+	return call(font1, font1IsMonospacedFont) != 0
 }
 
 // englishName returns the English name of localized strings, or their

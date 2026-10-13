@@ -45,6 +45,9 @@ func drag(w *mygo.Window, points [][2]float64) (ok bool) {
 
 func webViewAttached(*mygo.Window) (bool, bool) { return false, false }
 
+// Collection behaviors are macOS's.
+func collectionBehavior(*mygo.Window) (uint, bool) { return 0, false }
+
 // WebKitGTK docks the inspector inside the web view.
 func dockDevTools(*mygo.Window) bool { return false }
 
@@ -176,6 +179,8 @@ func pressTitleButton(w *mygo.Window, name string) (ok bool) {
 }
 
 func topNonClient(*mygo.Window) (int32, int32, bool) { return 0, 0, false }
+
+func menuBarColors(*mygo.Window) (uint32, uint32, bool) { return 0, 0, false }
 
 func titleButtonColor(*mygo.Window, string) (uint8, uint8, uint8, bool) { return 0, 0, 0, false }
 

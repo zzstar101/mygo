@@ -202,6 +202,44 @@ awake. On Linux, `OnLockScreen` is called when the screen saver starts,
 which usually locks the screen, and `IdleTime` is 0 on desktops that do not
 report it.
 
+## Secrets
+
+`mygo.Secrets` keeps small secrets, such as access tokens and API keys, in
+the system's credential store, which encrypts them for the user, unlike a
+file in the user data directory: the login Keychain on macOS, the Secret
+Service on Linux (GNOME Keyring, KWallet, KeePassXC…, through libsecret)
+and the Credential Manager on Windows.
+
+```go
+if err := mygo.Secrets.Set("github-token", []byte(token)); err != nil {
+	log.Println(err)
+}
+
+token, err := mygo.Secrets.Get("github-token")
+if errors.Is(err, mygo.ErrSecretNotFound) {
+	// Ask the user to sign in.
+}
+
+mygo.Secrets.Delete("github-token") // on sign out; nil when there is none
+```
+
+A secret may be at most `mygo.MaxSecretSize` (2560) bytes, the most the
+Credential Manager keeps, and a key at most 256 bytes. The methods are safe from any goroutine, also
+before `Run`, and may block while the system asks the user something, e.g.
+to unlock the keyring; on the main thread the app keeps handling events
+meanwhile. To use them from the page, bind a backend method that calls
+them, so that only what the page needs crosses into it.
+
+Secrets are stored under the app's identifier (its name in development)
+as the service and the key as the account, as Electron's keytar stores
+them, so an app moving from Electron keeps its users signed in. They
+protect against other users and stolen disks, not against other apps of
+the same user: macOS asks the user before another app reads them, and
+before a rebuilt app does when it is not signed with the same identity,
+while Linux and Windows let them read. Linux needs libsecret (the
+`libsecret-1-0` package on Debian and Ubuntu) and a running Secret
+Service; without them the methods return an error.
+
 ## Global shortcuts
 
 Global shortcuts work while the app is in the background, for example to
