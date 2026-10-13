@@ -178,8 +178,7 @@ first instance get the files of later ones on Windows and Linux.
 
 ## Recent documents
 
-Record the documents the user opens so the system lists them where it keeps
-recent files, and the user can open them again from there:
+Record the documents the user opens, so that the system offers them again:
 
 ```go
 if err := mygo.App.AddRecentDocument(path); err != nil {
@@ -187,31 +186,17 @@ if err := mygo.App.AddRecentDocument(path); err != nil {
 }
 ```
 
-`AddRecentDocument` makes the path absolute and records it in the Open Recent
-menu on macOS, in the app's own entries of the shared recent files list on
-Linux (`~/.local/share/recently-used.xbel`), and in the Recent category of the
-app's jump list on Windows (see [jump lists](windows.md#jump-lists)). That
-list is per user and shared with other apps, so record only what the user
-opened. On macOS the entries also show in the Dock menu, unless the app sets
-its own with `App.Dock.SetMenu`.
+macOS lists them in the app's Dock menu, Linux in the user's recently used
+files (`~/.local/share/recently-used.xbel`, the Recent of file choosers and
+file managers), and Windows in the Recent category of the app's
+[jump list](#jump-lists), for the file types the app is
+registered to open (see [file associations](#file-associations)). Choosing
+an entry of the Dock menu or the jump list opens the file with the app,
+which gets it through `OnOpenFile`.
 
-Choosing an entry opens the file again: its path arrives through
-`OnOpenFile`, like a file dropped on the Dock icon or passed on the command
-line.
-
-`ClearRecentDocuments` removes the entries the app added: it empties the Open
-Recent menu on macOS, drops the entries recorded under the app's name, from
-this run or earlier ones, and leaves the others on Linux, and clears the
-app's recent usage on Windows.
-
-```go
-if err := mygo.App.ClearRecentDocuments(); err != nil {
-	log.Println(err)
-}
-```
-
-There is no way to read the list back: the system owns it, and the app only
-adds to and clears its own entries.
+`ClearRecentDocuments` removes the documents the app recorded, for example
+when the user asks to clear its history. On Linux the user's other recent
+files stay.
 
 ## Start at login
 
@@ -284,6 +269,31 @@ user's language, such as `"en-US"`.
 - `App.Focus` brings the app to the front. On macOS, `App.Hide` and
   `App.Show` hide and show all its windows, and `App.ShowAboutPanel` shows
   the standard about panel.
+
+### Jump lists
+
+On Windows, right-clicking the app's taskbar button shows its jump list:
+the documents the user opened recently (see
+[recent documents](#recent-documents)) and tasks, programs to run with
+arguments, often the app itself, such as a text editor's "New note".
+`App.SetJumpListTasks` sets the tasks; Windows keeps them after the app
+quits, so setting them once at startup is enough:
+
+```go
+if err := mygo.App.SetJumpListTasks([]mygo.JumpListTask{
+	{Title: "New note", Args: "--new"},
+	{Title: "Notepad", Path: `C:\Windows\notepad.exe`},
+}); err != nil {
+	log.Println(err)
+}
+```
+
+`Path` is the app's own executable unless set, and the icon is the
+program's own unless `IconPath` (with `IconIndex`) names another. A task
+that runs the app starts another instance with `Args`: with
+[a single instance](#a-single-instance), the first one gets them through
+`OnSecondInstance`. No tasks removes them. `SetJumpListTasks` does nothing
+on macOS and Linux.
 
 ## Browsing data
 

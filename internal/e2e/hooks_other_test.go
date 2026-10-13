@@ -16,10 +16,6 @@ func pressShortcut(string, bool) (bool, bool) { return false, false }
 
 func endSheet(*mygo.Window) (bool, bool) { return false, false }
 
-// recentDocumentsSupported: no shell keeps recent documents on unsupported
-// platforms.
-func recentDocumentsSupported() bool { return false }
-
 func recentDocumentRecorded(string) (recorded, supported bool) { return false, false }
 
 func click(*mygo.Window, float64, float64) bool { return false }

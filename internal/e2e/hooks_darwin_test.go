@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -12,16 +11,9 @@ import (
 	"github.com/egoist/mygo/internal/darwin"
 )
 
-// recentDocumentsSupported: macOS keeps recent documents in NSDocumentController.
-func recentDocumentsSupported() bool { return true }
-
-// recentDocumentRecorded reports whether the app recorded path as a recent
-// document. macOS stores standardized paths, so the query is resolved the
-// same way: /var and /tmp are links to /private/... there.
+// recentDocumentRecorded reports whether path is among the app's recent
+// documents.
 func recentDocumentRecorded(path string) (recorded, supported bool) {
-	if std, err := filepath.EvalSymlinks(path); err == nil {
-		path = std
-	}
 	var paths []string
 	mygo.RunOnMain(func() { paths = darwin.TestRecentDocuments() })
 	return slices.Contains(paths, path), true

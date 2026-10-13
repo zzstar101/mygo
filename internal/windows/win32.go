@@ -197,13 +197,12 @@ var (
 	procGetHGlobalFromStream  = ole32.NewProc("GetHGlobalFromStream")
 
 	// shell32
-	procShellExecuteW                           = shell32.NewProc("ShellExecuteW")
-	procSHFileOperationW                        = shell32.NewProc("SHFileOperationW")
-	procShellNotifyIconW                        = shell32.NewProc("Shell_NotifyIconW")
-	procShellNotifyIconGetRect                  = shell32.NewProc("Shell_NotifyIconGetRect")
-	procSHCreateItemFromParsingName             = shell32.NewProc("SHCreateItemFromParsingName")
-	procSHAddToRecentDocs                       = shell32.NewProc("SHAddToRecentDocs")
-	procSetCurrentProcessExplicitAppUserModelID = shell32.NewProc("SetCurrentProcessExplicitAppUserModelID")
+	procShellExecuteW               = shell32.NewProc("ShellExecuteW")
+	procSHFileOperationW            = shell32.NewProc("SHFileOperationW")
+	procShellNotifyIconW            = shell32.NewProc("Shell_NotifyIconW")
+	procShellNotifyIconGetRect      = shell32.NewProc("Shell_NotifyIconGetRect")
+	procSHCreateItemFromParsingName = shell32.NewProc("SHCreateItemFromParsingName")
+	procSHAddToRecentDocs           = shell32.NewProc("SHAddToRecentDocs")
 
 	// shlwapi
 	procSHCreateMemStream = shlwapi.NewProc("SHCreateMemStream")
@@ -420,9 +419,6 @@ const (
 	coinitApartmentThreaded = 0x2
 	clsctxInprocServer      = 0x1
 
-	// SHARD flags of SHAddToRecentDocs.
-	shardPathW = 0x00000003
-
 	dpiAwarenessContextPerMonitorAwareV2 = ^uintptr(0) - 3 // -4
 
 	qsAllInput         = 0x04FF
@@ -540,13 +536,6 @@ type GUID struct {
 	Data2 uint16
 	Data3 uint16
 	Data4 [8]byte
-}
-
-// propertyKey is PROPERTYKEY: a property of a format identified by a GUID,
-// named by an id within it.
-type propertyKey struct {
-	Format GUID
-	ID     uint32
 }
 
 // guid parses "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".

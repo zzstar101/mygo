@@ -472,27 +472,21 @@ func (a appController) ClearBrowsingData(done func(error)) {
 	})
 }
 
+// AddRecentDocument and ClearRecentDocuments use the shared document
+// controller, as Electron does: AppKit lists its recent documents in the
+// Dock menu, and in an Open Recent menu.
 func (a appController) AddRecentDocument(path string) error {
-	var err error
 	withPool(func() {
-		dc := send(class("NSDocumentController"), "sharedDocumentController")
-		if dc == 0 {
-			err = errNoDocumentController
-			return
-		}
-		send(dc, "noteNewRecentDocumentURL:", uintptr(fileURL(path)))
-	})
-	return err
-}
-
-func (a appController) ClearRecentDocuments() error {
-	withPool(func() {
-		dc := send(class("NSDocumentController"), "sharedDocumentController")
-		if dc != 0 {
-			send(dc, "clearRecentDocuments:", 0)
-		}
+		send(send(class("NSDocumentController"), "sharedDocumentController"), "noteNewRecentDocumentURL:", uintptr(fileURL(path)))
 	})
 	return nil
 }
 
-func (appController) SetJumpList([]platform.JumpListTask) error { return nil }
+func (a appController) ClearRecentDocuments() error {
+	withPool(func() {
+		send(send(class("NSDocumentController"), "sharedDocumentController"), "clearRecentDocuments:", 0)
+	})
+	return nil
+}
+
+func (appController) SetJumpListTasks([]platform.JumpListTask) error { return nil }

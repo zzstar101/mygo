@@ -9,17 +9,6 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 )
 
-// recoverPanic runs fn and returns the string it panicked with, or "".
-func recoverPanic(fn func()) (msg string) {
-	defer func() {
-		if r := recover(); r != nil {
-			msg, _ = r.(string)
-		}
-	}()
-	fn()
-	return ""
-}
-
 func TestAddRecentDocument(t *testing.T) {
 	onMain(func() { fb.RecentDocuments = nil; fb.RecentCleared = 0 })
 	recent := func() []string { return onMainValue(func() []string { return fb.RecentDocuments }) }
@@ -39,9 +28,12 @@ func TestAddRecentDocument(t *testing.T) {
 	if got := recent(); len(got) != 2 || got[1] != want {
 		t.Errorf("RecentDocuments = %q, want the second to be %q", got, want)
 	}
-	// An empty path is a programming error.
-	if msg := recoverPanic(func() { App.AddRecentDocument("") }); msg != "mygo: App.AddRecentDocument needs a path" {
-		t.Errorf("AddRecentDocument(\"\") panicked with %q", msg)
+	// An empty path is not recorded.
+	if err := App.AddRecentDocument(""); err == nil {
+		t.Error("AddRecentDocument(\"\") succeeded")
+	}
+	if got := recent(); len(got) != 2 {
+		t.Errorf("RecentDocuments = %q after an empty path, want 2 entries", got)
 	}
 }
 
@@ -58,13 +50,13 @@ func TestClearRecentDocuments(t *testing.T) {
 	}
 }
 
-func TestSetJumpList(t *testing.T) {
+func TestSetJumpListTasks(t *testing.T) {
 	onMain(func() { fb.JumpListTasks = nil })
 	tasks := []JumpListTask{
 		{Title: "New note", Args: "--new"},
 		{Title: "Open", Path: "/usr/bin/open", IconPath: "/icon.ico", IconIndex: 3},
 	}
-	if err := App.SetJumpList(tasks); err != nil {
+	if err := App.SetJumpListTasks(tasks); err != nil {
 		t.Fatal(err)
 	}
 	got := onMainValue(func() []platform.JumpListTask { return fb.JumpListTasks })
@@ -81,14 +73,17 @@ func TestSetJumpList(t *testing.T) {
 		}
 	}
 	// No tasks removes them.
-	if err := App.SetJumpList(nil); err != nil {
+	if err := App.SetJumpListTasks(nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := onMainValue(func() []platform.JumpListTask { return fb.JumpListTasks }); len(got) != 0 {
-		t.Errorf("JumpListTasks after SetJumpList(nil) = %+v, want none", got)
+		t.Errorf("JumpListTasks after SetJumpListTasks(nil) = %+v, want none", got)
 	}
-	// A task without a title is a programming error.
-	if msg := recoverPanic(func() { App.SetJumpList([]JumpListTask{{Args: "--x"}}) }); msg != "mygo: App.SetJumpList: every task needs a title" {
-		t.Errorf("SetJumpList with an untitled task panicked with %q", msg)
+	// A task without a title sets nothing.
+	if err := App.SetJumpListTasks([]JumpListTask{{Title: "A"}, {Args: "--x"}}); err == nil {
+		t.Error("SetJumpListTasks with an untitled task succeeded")
+	}
+	if got := onMainValue(func() []platform.JumpListTask { return fb.JumpListTasks }); len(got) != 0 {
+		t.Errorf("JumpListTasks after an untitled task = %+v, want none", got)
 	}
 }

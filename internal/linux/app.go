@@ -366,4 +366,4 @@ func (a appController) ClearRecentDocuments() error {
 	return nil
 }
 
-func (appController) SetJumpList([]platform.JumpListTask) error { return nil }
+func (appController) SetJumpListTasks([]platform.JumpListTask) error { return nil }

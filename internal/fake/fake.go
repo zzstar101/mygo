@@ -59,7 +59,7 @@ type Backend struct {
 	RecentDocuments []string
 	// RecentCleared counts ClearRecentDocuments calls.
 	RecentCleared int
-	// JumpListTasks are the tasks of the last SetJumpList call.
+	// JumpListTasks are the tasks of the last SetJumpListTasks call.
 	JumpListTasks []platform.JumpListTask
 	// Dialog results returned by the next dialog.
 	OpenResult    []string
@@ -683,7 +683,7 @@ func (a app) ClearRecentDocuments() error {
 	return nil
 }
 
-func (a app) SetJumpList(tasks []platform.JumpListTask) error {
+func (a app) SetJumpListTasks(tasks []platform.JumpListTask) error {
 	a.b.mu.Lock()
 	defer a.b.mu.Unlock()
 	a.b.JumpListTasks = append([]platform.JumpListTask(nil), tasks...)

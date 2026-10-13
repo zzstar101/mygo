@@ -173,19 +173,14 @@ type AppController interface {
 	// is false for a plain executable (e.g. `go run`). Safe to call from
 	// any goroutine, before Init too.
 	Package() (info PackageInfo, ok bool)
-	// AddRecentDocument records path as a document the app opened, so the
-	// system offers it where the user picks documents from: the Open Recent
-	// menu (macOS), the recent files of the app's desktop entry (Linux) and
-	// the Recent category of the app's jump list (Windows). The path need
-	// not exist and is taken as absolute.
+	// AddRecentDocument records the absolute path of a document the user
+	// opened in the system's recent documents; ClearRecentDocuments
+	// removes the ones the app recorded.
 	AddRecentDocument(path string) error
-	// ClearRecentDocuments removes the documents the app added with
-	// AddRecentDocument, and only those on Linux, where the list is shared
-	// with every other application.
 	ClearRecentDocuments() error
-	// SetJumpList sets the tasks of the app's jump list (Windows); an empty
-	// list removes them. It does nothing elsewhere.
-	SetJumpList(tasks []JumpListTask) error
+	// SetJumpListTasks sets the Tasks category of the app's jump list
+	// (Windows); elsewhere it does nothing.
+	SetJumpListTasks(tasks []JumpListTask) error
 }
 
 // PackageInfo is metadata of a packaged application.
@@ -204,18 +199,12 @@ type AboutPanelOptions struct {
 	Credits            string
 }
 
-// JumpListTask is an entry of the Tasks category of a jump list (Windows).
-// A task runs a command, with or without the app running.
+// JumpListTask is a task of a jump list: a program to run, its label and
+// its icon.
 type JumpListTask struct {
-	// Title is the label shown in the jump list. It is required.
-	Title string
-	// Path is the program the task runs; empty is the app's own executable.
-	Path string
-	// Args is the command line passed to the program, as one string.
-	Args string
-	// IconPath and IconIndex choose the icon: the file holding it and the
-	// zero-based index of the icon in that file. An empty IconPath uses the
-	// program's own icon.
+	Title     string
+	Path      string
+	Args      string
 	IconPath  string
 	IconIndex int
 }

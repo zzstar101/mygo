@@ -44,9 +44,8 @@ const (
 )
 
 var (
-	errInvalidImage         = errors.New("mygo: invalid image data")
-	errClosed               = errors.New("mygo: window has been closed")
-	errNoDocumentController = errors.New("mygo: this system has no NSDocumentController")
+	errInvalidImage = errors.New("mygo: invalid image data")
+	errClosed       = errors.New("mygo: window has been closed")
 )
 
 type window struct {
