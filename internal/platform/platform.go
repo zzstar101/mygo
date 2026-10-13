@@ -187,6 +187,14 @@ type AppController interface {
 	// is false for a plain executable (e.g. `go run`). Safe to call from
 	// any goroutine, before Init too.
 	Package() (info PackageInfo, ok bool)
+	// AddRecentDocument records the absolute path of a document the user
+	// opened in the system's recent documents; ClearRecentDocuments
+	// removes the ones the app recorded.
+	AddRecentDocument(path string) error
+	ClearRecentDocuments() error
+	// SetJumpListTasks sets the Tasks category of the app's jump list
+	// (Windows); elsewhere it does nothing.
+	SetJumpListTasks(tasks []JumpListTask) error
 }
 
 // PackageInfo is metadata of a packaged application.
@@ -203,6 +211,16 @@ type AboutPanelOptions struct {
 	Version            string
 	Copyright          string
 	Credits            string
+}
+
+// JumpListTask is a task of a jump list: a program to run, its label and
+// its icon.
+type JumpListTask struct {
+	Title     string
+	Path      string
+	Args      string
+	IconPath  string
+	IconIndex int
 }
 
 // WindowOptions configures a native window and its webview. The public

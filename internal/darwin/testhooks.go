@@ -317,6 +317,19 @@ func TestDockMenu(click int) []string {
 	return titles
 }
 
+// TestRecentDocuments returns the paths of the documents the app recorded
+// with App.AddRecentDocument and did not clear, in the order the system
+// keeps them.
+func TestRecentDocuments() []string {
+	var paths []string
+	withPool(func() {
+		for _, u := range arrayItems(send(send(class("NSDocumentController"), "sharedDocumentController"), "recentDocumentURLs")) {
+			paths = append(paths, goString(send(u, "path")))
+		}
+	})
+	return paths
+}
+
 // TestFullScreenHidesToolbar reports whether a window asks to hide its
 // toolbar with the menu bar when it enters full screen.
 func TestFullScreenHidesToolbar(handle uintptr) bool {

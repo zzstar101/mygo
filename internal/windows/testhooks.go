@@ -486,3 +486,35 @@ func TestMenuBarColors(hwnd uintptr) (bar, line uint32, ok bool) {
 	l, _, _ := procGetPixel.Call(dc, x, uintptr(r.Bottom))
 	return uint32(b), uint32(l), true
 }
+
+// TestRecentDocuments returns the paths in the Recent category of the app's
+// jump list, newest first.
+func TestRecentDocuments() []string {
+	var (
+		clsid = guid("86bec222-30f2-47e0-9f25-60d11cd75c28") // ApplicationDocumentLists
+		iid   = guid("3c594f9f-9f30-47a1-979a-c9e83d3d0a06") // IApplicationDocumentLists
+	)
+	const adlGetList, adltRecent = 4, 0
+	lists, err := coCreate(clsid, iid)
+	if err != nil {
+		return nil
+	}
+	defer release(lists)
+	var arr uintptr
+	if failed(comCall(lists, adlGetList, adltRecent, 0, uintptr(unsafe.Pointer(&iidIObjectArray)), uintptr(unsafe.Pointer(&arr)))) {
+		return nil
+	}
+	defer release(arr)
+	var n uint32
+	comCall(arr, oaGetCount, uintptr(unsafe.Pointer(&n)))
+	var paths []string
+	for i := range n {
+		var item uintptr
+		if failed(comCall(arr, oaGetAt, uintptr(i), uintptr(unsafe.Pointer(&iidIShellItem)), uintptr(unsafe.Pointer(&item)))) {
+			continue
+		}
+		paths = append(paths, itemPath(item))
+		release(item)
+	}
+	return paths
+}

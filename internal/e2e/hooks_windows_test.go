@@ -3,6 +3,8 @@
 package e2e
 
 import (
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +21,14 @@ func activateMenu(w *mygo.Window, path ...string) (err error) {
 func pressShortcut(string, bool) (bool, bool) { return false, false }
 
 func endSheet(*mygo.Window) (bool, bool) { return false, false }
+
+// recentDocumentRecorded reports whether path is in the Recent category of
+// the app's jump list.
+func recentDocumentRecorded(path string) (recorded, supported bool) {
+	var paths []string
+	mygo.RunOnMain(func() { paths = win.TestRecentDocuments() })
+	return slices.ContainsFunc(paths, func(p string) bool { return strings.EqualFold(p, path) }), true
+}
 
 // Clicks reach windows showing native UI only: WebView2 takes the mouse in
 // windows of its own process.

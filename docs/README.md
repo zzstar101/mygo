@@ -81,8 +81,8 @@ that must start instantly.
   their events, and what windows showing web pages do with them:
   navigation, downloads, permissions, printing.
 - [The application](app.md): the lifecycle, quitting, a single instance,
-  deep links, file associations, starting at login and well-known
-  directories, browsing data and cookies.
+  deep links, file associations, recent documents, starting at login,
+  well-known directories, the jump list, browsing data and cookies.
 - [Menus and the tray](menus.md): application, context and Dock menus,
   keyboard shortcuts and tray icons.
 - [Desktop APIs](native.md): dialogs, notifications, the clipboard, the

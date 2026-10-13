@@ -3,12 +3,21 @@
 package e2e
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/internal/darwin"
 )
+
+// recentDocumentRecorded reports whether path is among the app's recent
+// documents.
+func recentDocumentRecorded(path string) (recorded, supported bool) {
+	var paths []string
+	mygo.RunOnMain(func() { paths = darwin.TestRecentDocuments() })
+	return slices.Contains(paths, path), true
+}
 
 func activateMenu(w *mygo.Window, path ...string) (err error) {
 	mygo.RunOnMain(func() { err = darwin.TestPerformMenuItem(path...) })

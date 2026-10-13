@@ -399,3 +399,33 @@ func TestTableSortBy(t *testing.T) {
 	tt.Click("Kind")
 	check("a click on Kind, first", SortOrder{Column: "Kind", Descending: true})
 }
+
+func TestTableHeaderMenu(t *testing.T) {
+	built, chosen := -1, -1
+	s := ListState{Columns: TableLayout{Order: []string{"Size", "Name", "Kind"}}}
+	cols := []TableColumn{{Title: "Name"}, {Title: "Kind", Width: 100}, {Title: "Size", Width: 80}}
+	tt := coreNewTester(tableView(&s, cols, []string{"a.txt"}), 500, 300)
+	// Without HeaderMenu, a header has no menu.
+	tt.RightClick("Kind")
+	if m := tt.Menu(); m != nil {
+		t.Fatalf("a menu without HeaderMenu: %q", m)
+	}
+	s.HeaderMenu = func(m *Menu, col int) {
+		built = col
+		if m.Item("Hide Column").Chosen() {
+			chosen = col
+		}
+	}
+	tt.Frame()
+	// Kind shows third, and is the second of the columns.
+	tt.RightClick("Kind")
+	if m := tt.Menu(); len(m) != 1 || m[0] != "Hide Column" || built != 1 {
+		t.Fatalf("the menu %q, built for column %d", m, built)
+	}
+	if err := tt.ChooseMenuItem("Hide Column"); err != nil {
+		t.Fatal(err)
+	}
+	if chosen != 1 {
+		t.Errorf("chose the item for column %d", chosen)
+	}
+}

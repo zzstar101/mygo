@@ -102,6 +102,10 @@ type ListState struct {
 	// the theme's Radius, as a List's are, rather than leaving them square
 	// from edge to edge.
 	RoundRows bool
+	// HeaderMenu, when set, gives a Table's column headers a context menu,
+	// built as ContextMenu's is: col is the column's index in the columns
+	// given to Table, not in the order the user moved them into.
+	HeaderMenu func(m *Menu, col int)
 
 	// The place: the first row in view, and how far the list is scrolled
 	// past its top: the row's top is that far above where the content

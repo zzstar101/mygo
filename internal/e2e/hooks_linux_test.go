@@ -73,6 +73,13 @@ func defaultURLHandler(scheme string) (id string, supported bool) {
 
 func dockMenu(int) ([]string, bool) { return nil, false }
 
+// recentDocumentRecorded reports whether path is among the user's recently
+// used files.
+func recentDocumentRecorded(path string) (recorded, supported bool) {
+	mygo.RunOnMain(func() { recorded = linux.TestHasRecentItem(path) })
+	return recorded, true
+}
+
 // pressCtrlShiftK presses Ctrl+Shift+K like a keyboard.
 func pressCtrlShiftK() (ok bool) {
 	mygo.RunOnMain(func() { ok = linux.TestPressKeys("Control_L", "Shift_L", "k") })
