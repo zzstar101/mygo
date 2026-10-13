@@ -594,15 +594,21 @@ func linuxDesktopEntry(c *Config, exec, icon string) string {
 }
 
 // desktopNames returns the name, the comment and the keywords a desktop
-// entry shows where the language of the system is not one of the app's: the
-// name of the app, the comment of the configuration or of a language, and
-// the keywords of the first language that has them.
+// entry shows: the first language of the app is the one it is in where the
+// language of the system is not one of the app's, and its name, comment and
+// keywords are the app's own where they are there.
 func (c *Config) desktopNames() (name, comment string, keywords []string) {
 	name, comment = c.Name, c.Linux.Comment
-	for _, l := range c.Languages {
-		if comment == "" {
-			comment = l.Comment
+	if len(c.Languages) > 0 {
+		first := c.Languages[0]
+		if first.Name != "" {
+			name = first.Name
 		}
+		if first.Comment != "" {
+			comment = first.Comment
+		}
+	}
+	for _, l := range c.Languages {
 		if len(keywords) == 0 {
 			keywords = l.Keywords
 		}

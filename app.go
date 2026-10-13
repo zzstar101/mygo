@@ -44,6 +44,9 @@ type Application struct {
 	stateStore WindowStateStore
 	// locale is the tag SetLocale set, or "" to follow the system.
 	locale string
+	// localeGeneration counts the SetLocale calls that changed the locale.
+	// The work they queue runs for the last one only.
+	localeGeneration uint64
 	// rememberLocale is whether RememberLocale keeps the tag SetLocale set
 	// across runs.
 	rememberLocale bool
@@ -420,6 +423,10 @@ func (a *Application) Locale() string {
 //
 // When the app remembers the language it shows (RememberLocale), the tag is
 // kept across runs, and an empty tag forgets it.
+//
+// Several calls made before the main thread gets to them are folded into
+// one: the app shows, hears and keeps the last tag only, so that a language
+// switched in quick steps is painted once.
 func (a *Application) SetLocale(tag string) {
 	tag = strings.TrimSpace(tag)
 	a.mu.Lock()
@@ -428,10 +435,22 @@ func (a *Application) SetLocale(tag string) {
 		return
 	}
 	a.locale = tag
+	a.localeGeneration++
+	generation := a.localeGeneration
 	a.mu.Unlock()
 	postMain(func() {
+		// The locale another goroutine set in the meantime is the one the
+		// app shows, and the one it remembers: the tag of this call may be
+		// older than it.
+		a.mu.Lock()
+		if a.localeGeneration != generation {
+			a.mu.Unlock()
+			return
+		}
+		own := a.locale
+		a.mu.Unlock()
 		locale := a.localeInEffect()
-		a.saveLocalePreference(tag)
+		a.saveLocalePreference(own)
 		localeChanged(locale)
 		fire1(&a.onLocaleChanged, locale)
 	})

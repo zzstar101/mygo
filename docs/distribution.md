@@ -402,9 +402,10 @@ The package depends on GTK 3 and WebKitGTK; `depends` adds more packages.
 the app.
 `comment` describes the app in its desktop entry and package, and
 `categories` places it in application menus (`Utility` by default).
-A language the app [declares](i18n.md#the-languages-a-build-declares)
-adds its `Name[zh_Hans]`, `Comment[zh_Hans]` and `Keywords[zh_Hans]` to the
-desktop entry, which a launcher shows in the language of the system.
+A language the app [declares](i18n.md#the-languages-a-build-declares) names
+it in the desktop entry: the first language is the one a launcher shows
+where the language of the system is not among them, and each further
+language adds its `Name[fr]`, `Comment[fr]` and `Keywords[fr]`.
 The app opens from the applications menu. `command` also gives it a
 command, `/usr/bin/my-app` from the package and `~/.local/bin/my-app` from
 [`install.sh`](#the-install-script); without it, neither adds a command,

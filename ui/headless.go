@@ -159,7 +159,9 @@ func coreRender(view func(c *context), width, height int, scale float32) *image.
 
 // Tester runs a view without a window, as a test drives it: it renders
 // frames in memory and sends the view pointer and keyboard input, between
-// which it settles the frames the view asks for.
+// which it settles the frames the view asks for. It needs no closing: a
+// windowless view holds nothing the framework keeps, so what it captured
+// goes when the tester does.
 type Tester struct {
 	rt *engine
 	h  *headless

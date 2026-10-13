@@ -26,6 +26,12 @@ func TestLanguageTagForms(t *testing.T) {
 		{"en-GB", "en_GB", "en", "en"},
 		{"zh-Hans", "zh_Hans", "zh", "zh-hans"},
 		{"zh-Hant-HK", "zh_Hant_HK", "zh", "zh-hant"},
+		{"zh", "zh", "zh", "zh-hans"},
+		{"zh-CN", "zh_CN", "zh", "zh-hans"},
+		{"zh-SG", "zh_SG", "zh", "zh-hans"},
+		{"zh-TW", "zh_TW", "zh", "zh-hant"},
+		{"zh-HK", "zh_HK", "zh", "zh-hant"},
+		{"zh-MO", "zh_MO", "zh", "zh-hant"},
 		{"pt-BR", "pt_BR", "pt", "pt"},
 		{"es-419", "es_419", "es", "es"},
 	} {
@@ -80,6 +86,10 @@ func TestNSISLanguage(t *testing.T) {
 		{"zh-CN", "SimpChinese", true},
 		{"zh-Hant", "TradChinese", true},
 		{"zh-Hant-HK", "TradChinese", true},
+		{"zh-TW", "TradChinese", true},
+		{"zh-HK", "TradChinese", true},
+		{"zh-MO", "TradChinese", true},
+		{"zh-SG", "SimpChinese", true},
 		{"pt-BR", "PortugueseBR", true},
 		{"pt", "Portuguese", true},
 		{"fr", "French", true},
@@ -210,15 +220,14 @@ func TestLanguagePackaging(t *testing.T) {
 	}
 
 	// Linux: the name, the comment and the keywords of each language, after
-	// the ones of an app whose system language is not among them.
+	// the ones of the app's own language, which a launcher shows where the
+	// system language is not among them.
 	entry := linuxDesktopEntry(c, "notes", "notes")
 	for _, want := range []string{
 		"Type=Application\n",
-		"Name=Notes\n",
-		"Name[zh_Hans]=笔记\n",
+		"Name=笔记\n",
 		"Name[fr]=Notes FR\n",
-		"Comment=Take notes\n",
-		"Comment[zh_Hans]=记笔记\n",
+		"Comment=记笔记\n",
 		"Keywords=笔记;记事本;\n",
 		"Keywords[fr]=notes;carnet;\n",
 	} {
@@ -226,7 +235,7 @@ func TestLanguagePackaging(t *testing.T) {
 			t.Errorf("the desktop entry has no %q:\n%s", want, entry)
 		}
 	}
-	for _, unwanted := range []string{"Comment[fr]", "Keywords[zh_Hans]", "Name[fr]=Notes\n"} {
+	for _, unwanted := range []string{"Name[zh_Hans]", "Comment[zh_Hans]", "Comment[fr]", "Keywords[zh_Hans]", "Name[fr]=Notes\n"} {
 		if strings.Contains(entry, unwanted) {
 			t.Errorf("the desktop entry has %q:\n%s", unwanted, entry)
 		}

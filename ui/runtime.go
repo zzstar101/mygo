@@ -349,10 +349,17 @@ func newRuntime(view func(*context), h host) *engine {
 	if frameStatsOn {
 		rt.stats = newFrameStats(frameStatsThreshold)
 	}
+	return rt
+}
+
+// watch adds the engine to the ones that hear what reaches every window at
+// once, as the texts UseTexts sets. A window shown calls it; a view rendered
+// without a window, as a test or a snapshot does, does not, so that its
+// engine and everything its view captured go when the view does.
+func (rt *engine) watch() {
 	enginesMu.Lock()
 	liveEngines[rt] = struct{}{}
 	enginesMu.Unlock()
-	return rt
 }
 
 func (rt *engine) defaultTheme() *Theme {

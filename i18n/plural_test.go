@@ -32,9 +32,9 @@ func TestPluralOf(t *testing.T) {
 		// Arabic and Hebrew, with their two.
 		{"ar", 0, Zero}, {"ar", 1, One}, {"ar", 2, Two}, {"ar", 3, Few},
 		{"ar", 10, Few}, {"ar", 11, Many}, {"ar", 99, Many}, {"ar", 100, Other},
-		{"ar-EG", 103, Few}, {"ar", 202, Two},
-		{"he", 1, One}, {"he", 2, Two}, {"he", 3, Other}, {"he", 10, Many},
-		{"he", 20, Many},
+		{"ar-EG", 103, Few}, {"ar", 102, Other}, {"ar", 202, Other},
+		{"he", 1, One}, {"he", 2, Two}, {"he", 3, Other}, {"he", 10, Other},
+		{"he", 20, Other}, {"he", 200, Other},
 		// A language i18n has no data for, and the POSIX spellings.
 		{"sv", 1, Other}, {"", 1, Other}, {"C", 2, Other},
 		{"de_DE.UTF-8", 1, One}, {"zh_TW.UTF-8", 1, Other},

@@ -27,13 +27,25 @@ func baseLanguage(tag string) string {
 
 // scriptLanguage is the language and script of a tag, lowercased, which
 // tells apart the languages one script each writes: zh-Hant-HK is zh-hant
-// and zh-Hans-CN is zh-hans.
+// and zh-Hans-CN is zh-hans. Chinese that names no script is Simplified,
+// except in Taiwan, Hong Kong and Macao, where it is Traditional.
 func scriptLanguage(tag string) string {
 	parts := strings.Split(tag, "-")
+	lang := strings.ToLower(parts[0])
 	if len(parts) > 1 && isScript(parts[1]) {
-		return strings.ToLower(parts[0]) + "-" + strings.ToLower(parts[1])
+		return lang + "-" + strings.ToLower(parts[1])
 	}
-	return strings.ToLower(parts[0])
+	if lang == "zh" {
+		region := ""
+		if len(parts) > 1 {
+			region = strings.ToUpper(parts[1])
+		}
+		if region == "TW" || region == "HK" || region == "MO" {
+			return "zh-hant"
+		}
+		return "zh-hans"
+	}
+	return lang
 }
 
 // isScript reports whether a part of a tag names a script, as "Hans" and

@@ -48,6 +48,7 @@ func FontFamilies(mono bool) []string {
 func (v *Content) AttachContent(conn *surface.Conn) {
 	h := &windowHost{conn: conn}
 	rt := newRuntime(v.view, h)
+	rt.watch()
 	h.rt = rt
 	conn.Event = h.event
 	conn.ThemeChanged = func() {

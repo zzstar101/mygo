@@ -137,6 +137,75 @@ func TestLocaleAfterNavigation(t *testing.T) {
 	receivedAfter(t, fw, seen, func(m map[string]any) bool { return localeEvent(m, "zh-Hans") })
 }
 
+// TestSetLocaleCoalesces checks that the SetLocale calls made before the
+// main thread gets to them become one: the app, and the pages, hear the last
+// tag only, instead of a repaint for every step and a tag that is already
+// older than the one the app shows.
+func TestSetLocaleCoalesces(t *testing.T) {
+	resetLocale(t)
+	path := rememberLocale(t)
+	_, fw := readyWindow(t, WindowOptions{})
+	onMain(func() { App.RememberLocale(true) })
+	onMain(func() {}) // everything the tests before queued has run
+
+	var heard []string
+	off := App.OnLocaleChanged(func(tag string) { heard = append(heard, tag) })
+	defer off()
+
+	// Hold the main thread, so that both calls queue their work before any
+	// of it runs.
+	held, release := make(chan struct{}), make(chan struct{})
+	go onMain(func() {
+		close(held)
+		<-release
+	})
+	<-held
+	seen := len(fw.Scripts())
+	App.SetLocale("zh-Hans")
+	App.SetLocale("ja")
+	close(release)
+	onMain(func() {}) // everything they queued has run by now
+
+	if got := App.Locale(); got != "ja" {
+		t.Errorf("App.Locale() = %q, want %q", got, "ja")
+	}
+	if got := readLocaleFile(t, path); got != "ja" {
+		t.Errorf("the app kept %q, want %q", got, "ja")
+	}
+	if len(heard) != 1 || heard[0] != "ja" {
+		t.Errorf("OnLocaleChanged heard %q, want [ja]", heard)
+	}
+	if got := localeEventsAfter(t, fw, seen); len(got) != 1 || got[0] != "ja" {
+		t.Errorf("the page heard %q, want [ja]", got)
+	}
+}
+
+// localeEventsAfter returns the tags the mygo:locale event carried in a
+// script after the first n.
+func localeEventsAfter(t *testing.T, fw *fake.Window, n int) []string {
+	t.Helper()
+	var tags []string
+	scripts := fw.Scripts()
+	for _, s := range scripts[min(n, len(scripts)):] {
+		const prefix = "__mygo.receive("
+		if !strings.HasPrefix(s, prefix) {
+			continue
+		}
+		var msgs []map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(s, prefix), ")")), &msgs); err != nil {
+			t.Fatalf("bad script %q: %v", s, err)
+		}
+		for _, m := range msgs {
+			if m["t"] == "event" && m["n"] == "mygo:locale" {
+				if tag, ok := m["p"].(string); ok {
+					tags = append(tags, tag)
+				}
+			}
+		}
+	}
+	return tags
+}
+
 // receivedAfter is received for messages delivered in a script after the
 // first n, which the tests use to tell a new delivery from an earlier one.
 func receivedAfter(t *testing.T, fw *fake.Window, n int, pred func(m map[string]any) bool) map[string]any {

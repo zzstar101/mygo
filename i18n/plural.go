@@ -178,7 +178,9 @@ func pluralArabic(n int) Plural {
 		return Zero
 	case n == 1:
 		return One
-	case rem == 2:
+	case n == 2:
+		// Two is two, not every count that ends in two: 102 and 202 are
+		// counted like any other count.
 		return Two
 	case rem >= 3 && rem <= 10:
 		return Few
@@ -188,15 +190,14 @@ func pluralArabic(n int) Plural {
 	return Other
 }
 
-// pluralHebrew is the rule of Hebrew.
+// pluralHebrew is the rule of Hebrew, which tells one, two and the rest
+// apart: a count of ten or more is written like any other.
 func pluralHebrew(n int) Plural {
 	switch {
 	case n == 1:
 		return One
 	case n == 2:
 		return Two
-	case n != 0 && n%10 == 0:
-		return Many
 	}
 	return Other
 }

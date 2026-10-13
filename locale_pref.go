@@ -30,13 +30,20 @@ const localePreferenceFile = "locale"
 func (a *Application) RememberLocale(on bool) {
 	a.mu.Lock()
 	a.rememberLocale = on
-	tag := a.locale
+	own := a.locale != ""
 	a.mu.Unlock()
 	// A tag of its own, set before the app remembers them, is worth keeping
 	// now. An app following the system has nothing to keep, and leaves what
 	// Run is about to read alone.
-	if on && tag != "" {
-		postMain(func() { a.saveLocalePreference(tag) })
+	if on && own {
+		postMain(func() {
+			// The locale the app shows now, which another goroutine may
+			// have set after this call.
+			a.mu.Lock()
+			tag := a.locale
+			a.mu.Unlock()
+			a.saveLocalePreference(tag)
+		})
 	}
 }
 

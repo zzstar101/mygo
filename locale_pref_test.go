@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -157,5 +158,36 @@ func TestRestoreLocalePreferenceIgnoresDamage(t *testing.T) {
 		if got := App.Locale(); got != "en-US" {
 			t.Errorf("App.Locale() = %q for %q, want %q", got, bad, "en-US")
 		}
+	}
+}
+
+// TestSetLocaleFromEveryGoroutine checks that the language kept for the next
+// run is the one the app ends up showing: SetLocale is safe to call from any
+// goroutine, and the tag another goroutine set in the meantime is the one
+// that counts.
+func TestSetLocaleFromEveryGoroutine(t *testing.T) {
+	resetLocale(t)
+	path := rememberLocale(t)
+	onMain(func() { App.RememberLocale(true) })
+
+	tags := []string{"fr", "de", "zh-Hans", "en-GB", "pt-BR", "ja", "es-ES", "it", "nl", "ru", "ko", "pl"}
+	var wg sync.WaitGroup
+	for _, tag := range tags {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			App.SetLocale(tag)
+		}()
+	}
+	wg.Wait()
+	// Everything SetLocale posted has run by now.
+	onMain(func() {})
+
+	locale := App.Locale()
+	if locale == "" {
+		t.Fatalf("the app shows no language of its own")
+	}
+	if got := readLocaleFile(t, path); got != locale {
+		t.Errorf("the app shows %q and kept %q", locale, got)
 	}
 }
