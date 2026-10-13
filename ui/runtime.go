@@ -157,6 +157,9 @@ type engine struct {
 	trans map[uint64]*transition
 	// matched is where the elements of a Transition's Match showed.
 	matched map[any]*matchRec
+	// timelines are the Timelines of the frame by their keys (timeline.go),
+	// dropped when a frame does not build one, as element state is.
+	timelines map[any]*timelineState
 	// instantFrame is the frame that DisableAnimations shows at once.
 	instantFrame uint64
 	// paints counts the frames painted, those painting the last frame's
@@ -667,6 +670,12 @@ func (rt *engine) prune() {
 					rt.free = append(rt.free, s)
 				}
 			}
+		}
+	}
+	for k, st := range rt.timelines {
+		// A Timeline the frame did not build is gone, playhead and all.
+		if st.frame != rt.frame || st.pass != rt.pass {
+			delete(rt.timelines, k)
 		}
 	}
 	if unpressed {

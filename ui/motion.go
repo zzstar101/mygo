@@ -623,6 +623,37 @@ func (e *node) Keyframes(key any, frames []Keyframe, options ...KeyframeOptions)
 	return s.value
 }
 
+// playhead folds how long an animation has played into the time it shows:
+// where it is within its duration, repeating and alternating as asked, and
+// whether it came to rest at its end. iteration is which time through it
+// is, for what starts from a value of its own the first time. A duration of
+// zero plays on, for an animation whose duration is not known yet.
+func playhead(raw, d time.Duration, repeat int, alternate bool, repeatDelay time.Duration) (time.Duration, int64, bool) {
+	if raw <= 0 {
+		return 0, 0, false
+	}
+	if d <= 0 {
+		return raw, 0, false
+	}
+	plays := int64(repeat) + 1 // zero when it plays for ever
+	period := d + repeatDelay
+	if period < d {
+		period = d
+	}
+	iteration, rest := int64(raw/period), raw%period
+	if repeat != RepeatForever && (iteration >= plays || iteration == plays-1 && rest >= d) {
+		if alternate && plays%2 == 0 {
+			return 0, iteration, true // it came back to where it started
+		}
+		return d, iteration, true
+	}
+	at := min(rest, d)
+	if alternate && iteration%2 == 1 {
+		at = d - at
+	}
+	return at, iteration, false
+}
+
 type sequence struct {
 	frames  []Keyframe
 	options KeyframeOptions
@@ -655,18 +686,9 @@ func (s *sequence) sample(now time.Time) (float32, bool) {
 		return s.value, true
 	}
 	d := s.frames[len(s.frames)-1].At
-	elapsed := now.Sub(s.start)
-	if elapsed < 0 {
-		return s.from, false // delayed
-	}
-	period := d + s.options.RepeatDelay
-	iteration := int64(elapsed / period)
-	if n := s.plays(); n != 0 && (iteration >= n || iteration == n-1 && elapsed%period >= d) {
+	at, iteration, done := playhead(now.Sub(s.start), d, s.options.Repeat, s.options.Alternate, s.options.RepeatDelay)
+	if done {
 		return s.final(), true
-	}
-	at := min(elapsed%period, d)
-	if s.options.Alternate && iteration%2 != 0 {
-		at = d - at
 	}
 	for i := 1; i < len(s.frames); i++ {
 		b := s.frames[i]

@@ -114,8 +114,9 @@ framework safely. Read it before changing anything under `internal/`.
 ├── examples/           hello, todo, frameless, native; counter-native, vibrancy,
 │                       effort-slider, flyout, menubar-flyout, piano, farm
 │                       and mayoi (games), code-editor and gallery (native
-│                       UI); webview (web views in native UI); launcher
-│                       (a Spotlight-like panel, native UI)
+│                       UI), timeline (motion on one playhead); webview (web
+│                       views in native UI); launcher (a Spotlight-like panel,
+│                       native UI)
 ├── docs/               the user guides, the official plugins' pages
 │                       (plugins/), and this architecture guide
 └── website/            the website, with these docs: TanStack Start, prerendered
