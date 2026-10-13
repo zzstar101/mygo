@@ -114,6 +114,9 @@ type editor struct {
 	view  view
 	o     options
 	theme *Theme
+	// texts are the strings the editor says of its own, in the language of
+	// the app's locale, as the frame they were built in read them.
+	texts ui.Texts
 
 	sels   []sel
 	nextID int

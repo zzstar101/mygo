@@ -1,12 +1,13 @@
 package editor
 
 import (
-	"fmt"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // finder is an editor's find bar and its matches, as Zed's buffer
@@ -366,19 +367,20 @@ func (f *finder) replacement(text string, i int) string {
 	return string(re.ExpandString(nil, f.replace, text, f.subs[i]))
 }
 
-// status is what the bar says of the matches.
-func (f *finder) status() string {
+// status is what the bar says of the matches, in the texts of the language
+// the app shows.
+func (f *finder) status(tx ui.Texts) string {
 	switch {
 	case f.err != nil:
-		return "Invalid"
+		return tx.Invalid
 	case f.query == "":
 		return ""
 	case len(f.matches) == 0:
-		return "No results"
+		return tx.NoResults
 	case len(f.matches) >= maxMatches:
-		return fmt.Sprintf("%d of %d+", f.current+1, len(f.matches))
+		return tx.Matches(f.current+1, len(f.matches), true)
 	}
-	return fmt.Sprintf("%d of %d", f.current+1, len(f.matches))
+	return tx.Matches(f.current+1, len(f.matches), false)
 }
 
 // selectAll selects every match, as alt-enter in Zed's search bar.

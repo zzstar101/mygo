@@ -105,6 +105,9 @@ type DiffState struct {
 	built   diffGeom
 	gapList []diffGap
 	partial *diffPartial
+	// texts are the strings of the viewer, read on the last build (see
+	// Context.Texts), which the sides' editors name their text with.
+	texts ui.Texts
 }
 
 // DiffLayout is how a diff viewer lays out its two texts.
@@ -384,9 +387,9 @@ func (d *DiffState) sideOptions(old bool) options {
 	if d.NoLineNumbers {
 		o.lineNumbers = LineNumbersOff
 	}
-	o.label = "New text"
+	o.label = d.texts.NewText
 	if old {
-		o.label = "Old text"
+		o.label = d.texts.OldText
 	}
 	return o
 }
@@ -395,6 +398,7 @@ func (d *DiffState) sideOptions(old bool) options {
 func DiffView(c *ui.Context, d *DiffState) ui.Element {
 	d.ensure()
 	t := c.Theme()
+	d.texts = c.Texts()
 	ct := d.Theme.resolve(t)
 	opts := d.sideOptions
 	d.sides[0] = diffSide{d: d, old: true, hide: d.sides[0].hide, blks: d.sides[0].blks}
