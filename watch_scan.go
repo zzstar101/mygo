@@ -83,7 +83,7 @@ func (s *fileWatchScan) scan() (map[string]os.FileInfo, error) {
 	}
 	if s.root == nil {
 		s.identity = info
-		s.root, err = os.OpenRoot(s.w.root)
+		s.root, err = fileWatchOpenRoot(s.w.root)
 		if err != nil {
 			return nil, err
 		}

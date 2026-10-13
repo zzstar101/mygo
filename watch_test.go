@@ -9,12 +9,34 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/internal/fake"
 	"github.com/egoist/mygo/internal/platform"
 )
+
+// Resolve the enrollment by path: Windows enrolls a private parent sentinel
+// before the root, so target IDs are not portable.
+func fileWatchTestNotice(t *testing.T, w *FileWatcher, path string, notice platform.FileWatchNotice) {
+	t.Helper()
+	found := false
+	onMain(func() {
+		native := w.native.(*fake.FileWatch)
+		for id, target := range native.Targets {
+			if target.Path == filepath.Join(w.root, filepath.FromSlash(path)) {
+				notice.Target = id
+				native.Notify(notice)
+				found = true
+				break
+			}
+		}
+	})
+	if !found {
+		t.Fatalf("no watch target for %q", path)
+	}
+}
 
 func TestFileWatchLifecycle(t *testing.T) {
 	dir := t.TempDir()
@@ -23,12 +45,10 @@ func TestFileWatchLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	var inject func(platform.FileWatchNotice)
-	onMain(func() { inject = fb.FileWatches[len(fb.FileWatches)-1].Notify })
 	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("hello"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	onMain(func() { inject(platform.FileWatchNotice{Target: 1}) })
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	e, err := w.Next(ctx)
@@ -53,6 +73,42 @@ func TestFileWatchLifecycle(t *testing.T) {
 	case <-w.Done():
 	case <-ctx.Done():
 		t.Fatal("cleanup timed out")
+	}
+}
+
+func TestFileWatchParentSentinel(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows enrolls a parent sentinel")
+	}
+	w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{Debounce: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := os.WriteFile(filepath.Join(w.root, "a"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A hint for a sibling must not scan the root or expose the sibling.
+	fileWatchTestNotice(t, w, "..", platform.FileWatchNotice{Name: filepath.Base(w.root) + "-sibling"})
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if _, err := w.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("sibling hint was not ignored: %v", err)
+	}
+	fileWatchTestNotice(t, w, "..", platform.FileWatchNotice{Name: filepath.Base(w.root)})
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for {
+		e, err := w.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Path == "a" && e.Op == FileCreate {
+			break
+		}
+		if e.Path != "." {
+			t.Fatalf("unexpected event: %+v", e)
+		}
 	}
 }
 
@@ -109,7 +165,7 @@ func TestFileWatchOverflow(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	onMain(func() { fb.FileWatches[len(fb.FileWatches)-1].Notify(platform.FileWatchNotice{Target: 1}) })
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{})
 	select {
 	case <-w.Done():
 	case <-time.After(time.Second):
@@ -133,9 +189,7 @@ func TestFileWatchRootLoss(t *testing.T) {
 	if err := os.Remove(dir); err != nil {
 		t.Fatal(err)
 	}
-	onMain(func() {
-		fb.FileWatches[len(fb.FileWatches)-1].Notify(platform.FileWatchNotice{Target: 1, Kind: platform.FileWatchRemove})
-	})
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Kind: platform.FileWatchRemove})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	e, err := w.Next(ctx)
@@ -144,6 +198,37 @@ func TestFileWatchRootLoss(t *testing.T) {
 	}
 	if _, err = w.Next(ctx); err == nil || err == io.EOF {
 		t.Fatal(err)
+	}
+}
+
+func TestFileWatchRootReplacement(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "root")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Debounce: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	// The anchored handle must allow renames, but must not silently follow
+	// a different directory subsequently installed at the watched path.
+	if err := os.Rename(dir, filepath.Join(parent, "retired")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	e, err := w.Next(ctx)
+	if err != nil || e.Path != "." || e.Op != FileRemove {
+		t.Fatalf("%+v %v", e, err)
+	}
+	if _, err := w.Next(ctx); !errors.Is(err, errWatchRootChanged) {
+		t.Fatalf("replacement: %v", err)
 	}
 }
 
@@ -171,7 +256,7 @@ func TestFileWatchEnrollmentRace(t *testing.T) {
 					if err := create(path); err != nil {
 						t.Fatal(err)
 					}
-					onMain(func() { native.Notify(platform.FileWatchNotice{Target: 1}) })
+					fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{})
 					deadline := time.Now().Add(time.Second)
 					for {
 						found := false
@@ -221,7 +306,7 @@ func TestFileWatchEnrollmentRace(t *testing.T) {
 					if err := os.WriteFile(filepath.Join(dir, "later"), nil, 0600); err != nil {
 						t.Fatal(err)
 					}
-					onMain(func() { native.Notify(platform.FileWatchNotice{Target: 1}) })
+					fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{})
 					for {
 						e, err := w.Next(ctx)
 						if err != nil {
@@ -246,12 +331,25 @@ func TestFileWatchDiff(t *testing.T) {
 	if err := os.WriteFile(a, []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	info, _ := os.Stat(a)
+	f, err := os.Open(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Stat through a handle captures the identity now. On Windows os.Stat
+	// defers fetching it until SameFile, when the old name no longer exists.
+	info, err := f.Stat()
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	old := map[string]os.FileInfo{"a": info}
 	if err := os.Rename(a, b); err != nil {
 		t.Fatal(err)
 	}
-	info, _ = os.Stat(b)
+	info, err = os.Stat(b)
+	if err != nil {
+		t.Fatal(err)
+	}
 	events := fileWatchDiff(old, map[string]os.FileInfo{"b": info}, map[string]bool{"a": true})
 	if len(events) != 2 || events[0].Op != FileRename || events[0].OldPath != "a" || events[1].Op != FileWrite {
 		t.Fatalf("%+v", events)
