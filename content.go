@@ -49,6 +49,7 @@ func (w *Window) attachContent() {
 		Escape:        w.escape,
 		IsDark:        func() bool { return backend().Theme().IsDark() },
 		Preferences:   func() platform.Preferences { return backend().Theme().Preferences() },
+		Locale:        func() string { return App.localeInEffect() },
 		UIFont:        func() string { return backend().Theme().UIFont() },
 		FontRendering: func() platform.FontRendering { return backend().Theme().FontRendering() },
 		TitleBar: func() platform.TitleBar {
@@ -289,5 +290,13 @@ func contentThemeChanged() {
 		if c := w.conn; c != nil && c.ThemeChanged != nil {
 			c.ThemeChanged()
 		}
+	}
+}
+
+// contentLocaleChanged tells the Contents of the windows that the locale
+// the app shows changed. Main thread only.
+func contentLocaleChanged() {
+	for _, w := range Windows() {
+		w.contentChanged()
 	}
 }

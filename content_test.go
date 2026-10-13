@@ -32,6 +32,82 @@ func contentWindow(t *testing.T, view func(c *ui.Context)) (*Window, *fake.Windo
 	return w, fw, s
 }
 
+// accessLabels returns the labels of the surface's last accessibility tree.
+func accessLabels(s *fake.Surface) []string {
+	tree, _ := s.Accessibility()
+	if tree == nil {
+		return nil
+	}
+	var out []string
+	for _, n := range tree.Nodes {
+		if n.Label != "" {
+			out = append(out, n.Label)
+		}
+	}
+	return out
+}
+
+// accessLabel reports whether the surface's last accessibility tree names an
+// element label.
+func accessLabel(s *fake.Surface, label string) bool {
+	for _, l := range accessLabels(s) {
+		if l == label {
+			return true
+		}
+	}
+	return false
+}
+
+// TestContentLocale checks that the locale the app shows reaches the
+// controls of a window's native UI, and that OnLocaleChanged tells the app.
+func TestContentLocale(t *testing.T) {
+	day := time.Date(2026, 10, 15, 9, 41, 0, 0, time.UTC)
+	_, _, s := contentWindow(t, func(c *ui.Context) { ui.Calendar(c, &day) })
+	t.Cleanup(func() { App.SetLocale("") })
+	onMain(func() {
+		s.Send(platform.SurfaceEvent{Kind: platform.AccessibilityOn})
+		s.Frame()
+	})
+	if !accessLabel(s, "October 2026") {
+		t.Fatalf("the calendar reads %v", accessLabels(s))
+	}
+	// Until SetLocale says otherwise, the app shows the user's preferred
+	// locale.
+	if got := App.Locale(); got != "en-US" {
+		t.Errorf("Locale() = %q", got)
+	}
+	changed := make(chan string, 1)
+	t.Cleanup(App.OnLocaleChanged(func(locale string) { changed <- locale }))
+	App.SetLocale("zh-Hans")
+	if got := App.Locale(); got != "zh-Hans" {
+		t.Fatalf("Locale() = %q after SetLocale", got)
+	}
+	select {
+	case got := <-changed:
+		if got != "zh-Hans" {
+			t.Fatalf("OnLocaleChanged(%q)", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnLocaleChanged was not called")
+	}
+	onMain(func() { s.Frame() })
+	if !accessLabel(s, "2026年10月") {
+		t.Errorf("after SetLocale the calendar reads %v", accessLabels(s))
+	}
+	// Setting the tag it already shows changes nothing.
+	App.SetLocale("zh-Hans")
+	select {
+	case got := <-changed:
+		t.Errorf("OnLocaleChanged(%q) for the tag it already showed", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	// An empty tag follows the user's preferred locale again.
+	App.SetLocale("")
+	if got := App.Locale(); got != "en-US" {
+		t.Errorf("Locale() = %q after SetLocale(\"\")", got)
+	}
+}
+
 // TestContentReadyToShow checks that a window showing Content is ready to
 // show once it drew its first frame, which also tells mygo dev that a new
 // build is up.

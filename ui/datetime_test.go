@@ -39,6 +39,43 @@ func TestCalendar(t *testing.T) {
 	}
 }
 
+// The texts of the controls are the app's locale's, from App.SetLocale.
+func TestCalendarLocalized(t *testing.T) {
+	day := time.Date(2026, 10, 15, 9, 41, 0, 0, time.UTC)
+	tt := coreNewTester(func(c *context) {
+		coreDateInput(c, &day).Label("Due")
+	}, 400, 420)
+	if err := tt.Click("Due"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("October 2026") || !tt.HasText("Next month") {
+		t.Fatalf("English shows %q", tt.Texts())
+	}
+	// Another language, with no restart.
+	tt.SetLocale("zh-Hans")
+	if !tt.HasText("2026年10月") || !tt.HasText("下个月") || tt.HasText("Next month") {
+		t.Fatalf("zh-Hans shows %q", tt.Texts())
+	}
+	if err := tt.Click("2026年10月20日"); err != nil {
+		t.Fatal(err)
+	}
+	if y, m, d := day.Date(); y != 2026 || m != 10 || d != 20 {
+		t.Fatalf("a click chose %v", day)
+	}
+	// The field itself is ISO in every language.
+	if !tt.HasText("2026-10-20") {
+		t.Errorf("the field shows %q", tt.Texts())
+	}
+	// A language the framework has no texts of says English.
+	tt.SetLocale("de-DE")
+	if err := tt.Click("Due"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("October 2026") || !tt.HasText("Next month") {
+		t.Fatalf("de-DE shows %q", tt.Texts())
+	}
+}
+
 func TestTimeInput(t *testing.T) {
 	alarm := time.Date(2026, 10, 4, 7, 30, 0, 0, time.UTC)
 	changes := 0

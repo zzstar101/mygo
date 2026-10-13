@@ -725,6 +725,23 @@ func (g *gallery) controls(c *ui.Context) {
 				ui.Text(c, g.meeting.Format("Monday, January 2 at 15:04")).TextColor(g.tint)
 			})
 		})
+		// The controls say their own texts in the app's locale, which
+		// App.SetLocale changes while the window is open.
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "The controls say their own texts in").TextColor(t.TextMuted)
+			ui.MenuButton(c, mygo.App.Locale(), func(m *ui.Menu) {
+				for _, l := range []struct{ tag, name string }{
+					{"", "Follow the system"},
+					{"en", "English"},
+					{"zh-Hans", "简体中文"},
+					{"zh-Hant", "繁體中文"},
+				} {
+					if m.Item(l.name).Chosen() {
+						mygo.App.SetLocale(l.tag)
+					}
+				}
+			})
+		})
 	})
 	card(c, "Indicators", func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {

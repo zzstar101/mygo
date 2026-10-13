@@ -12,8 +12,9 @@ import (
 // new date, which keeps the time of day and location of *date.
 func coreDateInput(c *context, date *time.Time) *node {
 	t := c.theme
+	tx := textsFor(c.rt.locale())
 	b := coreButton(c, "")
-	b.widget, b.role, b.accValue = "DateInput", RolePopUpButton, date.Format("2006-01-02")
+	b.widget, b.role, b.accValue = "DateInput", RolePopUpButton, tx.Day(date.Year(), date.Month(), date.Day())
 	b.MinWidth(t.Space(32.5)).Justify(SpaceBetween)
 	open := coreLocal(b, "open", func() bool { return false })
 	// cursor is the day the keys move in the calendar.
@@ -93,9 +94,10 @@ func sameDay(a, b time.Time) bool {
 // every move does with moveChooses.
 func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose func(time.Time)) *node {
 	t := c.theme
+	tx := textsFor(c.rt.locale())
 	cur := *cursor
 	month := time.Date(cur.Year(), cur.Month(), 1, 0, 0, 0, 0, time.UTC)
-	grid := coreColumn(c).Gap(t.Space(0.5)).Focusable().Shrink(0).Role(RoleTable).Label(month.Format("January 2006"))
+	grid := coreColumn(c).Gap(t.Space(0.5)).Focusable().Shrink(0).Role(RoleTable).Label(tx.MonthYear(month.Year(), month.Month()))
 	grid.flags |= flagOwnRing
 	move := func(d time.Time) {
 		// Choosing it moves the cursor where it is the date chosen.
@@ -130,15 +132,15 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 	})
 	grid.Children(func() {
 		coreRow(c).AlignItems(Center).Gap(t.Space(1)).Children(func() {
-			prev := coreButton(c, "‹").Padding(t.Space(0.5), t.Space(2.5)).Label("Previous month")
+			prev := coreButton(c, "‹").Padding(t.Space(0.5), t.Space(2.5)).Label(tx.PreviousMonth)
 			prev.flags |= flagClickable
 			prev.afterInput(func() {
 				if prev.Clicked() {
 					move(cur.AddDate(0, -1, 0))
 				}
 			})
-			coreText(c, month.Format("January 2006")).Bold().Grow(1).TextAlign(Center)
-			next := coreButton(c, "›").Padding(t.Space(0.5), t.Space(2.5)).Label("Next month")
+			coreText(c, tx.MonthYear(month.Year(), month.Month())).Bold().Grow(1).TextAlign(Center)
+			next := coreButton(c, "›").Padding(t.Space(0.5), t.Space(2.5)).Label(tx.NextMonth)
 			next.flags |= flagClickable
 			next.afterInput(func() {
 				if next.Clicked() {
@@ -147,18 +149,19 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 			})
 		})
 		coreRow(c).Children(func() {
-			for _, d := range []string{"Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"} {
+			for i := range 7 {
+				d := tx.Weekdays[(int(tx.FirstWeekday)+i)%7]
 				coreText(c, d).Width(t.Space(8)).TextAlign(Center).FontSize(t.FontSize - 2).TextColor(t.TextMuted).Role(RoleColumnHeader)
 			}
 		})
-		// Six weeks from the Monday on or before the first.
-		start := month.AddDate(0, 0, -((int(month.Weekday()) + 6) % 7))
+		// Six weeks from the first day of the week on or before the first.
+		start := month.AddDate(0, 0, -((int(month.Weekday()) - int(tx.FirstWeekday) + 7) % 7))
 		today := c.now
 		for w := range 6 {
 			coreRow(c).Role(RoleRow).Children(func() {
 				for d := range 7 {
 					day := start.AddDate(0, 0, w*7+d)
-					cell := coreBox(c).Size(t.Space(8), t.Space(7)).Center().Radius(t.Radius).Role(RoleButton).Label(day.Format("January 2, 2006"))
+					cell := coreBox(c).Size(t.Space(8), t.Space(7)).Center().Radius(t.Radius).Role(RoleButton).Label(tx.Day(day.Year(), day.Month(), day.Day()))
 					cell.flags |= flagClickable | flagHover
 					cell.afterInput(func() {
 						if cell.Clicked() {

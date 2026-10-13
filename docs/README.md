@@ -88,6 +88,9 @@ that must start instantly.
 - [Desktop APIs](native.md): dialogs, notifications, the clipboard, the
   shell, displays, dark mode, power, the network status, secrets, watching
   files and global shortcuts.
+- [Languages](i18n.md): the locale an app shows, the strings of the
+  controls, matching the desktop's language, and knowing when the locale
+  changes.
 - [Clipboard and drag data](data-transfer.md): multiple representations,
   file lists, custom formats, lazy providers, and clipboard persistence.
 - [Audio](audio.md): sound effects, streamed music and sound an app makes

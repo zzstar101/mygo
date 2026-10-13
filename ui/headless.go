@@ -33,9 +33,12 @@ type headless struct {
 	openErr error
 	// later are what the view asked to run after the frame, as a window
 	// posts them to the main thread.
-	later  []func()
-	bar    TitleBar
-	access *platform.AccessTree
+	later []func()
+	bar   TitleBar
+	// localeTag is the locale SetLocale set, or "" for the framework's
+	// own language.
+	localeTag string
+	access    *platform.AccessTree
 	// told are the announcements of the trees, and announced those the
 	// view made.
 	told, announced []string
@@ -108,6 +111,7 @@ func (h *headless) titleBarDoubleClicked()            {}
 func (h *headless) escape()                           { h.escapes++ }
 func (h *headless) isDark() bool                      { return h.dark }
 func (h *headless) preferences() platform.Preferences { return h.prefs }
+func (h *headless) locale() string                    { return h.localeTag }
 func (h *headless) titleBar() TitleBar                { return h.bar }
 func (h *headless) vibrancy() bool                    { return h.material }
 func (h *headless) invalidate()                       { h.requested.Store(true) }
@@ -235,6 +239,14 @@ func (t *Tester) SetPreferences(p Preferences) {
 	t.h.prefs = platform.Preferences{Accent: platform.Color{R: p.Accent.R, G: p.Accent.G, B: p.Accent.B, A: p.Accent.A}, ReduceMotion: p.ReduceMotion,
 		HighContrast: p.HighContrast, TextScale: float64(p.TextScale)}
 	t.rt.themeChanged()
+	t.settle()
+}
+
+// SetLocale makes the controls of package ui say their own texts in the
+// language of locale, as App.SetLocale does; "" is the framework's own.
+func (t *Tester) SetLocale(locale string) {
+	t.h.localeTag = locale
+	t.rt.changed()
 	t.settle()
 }
 

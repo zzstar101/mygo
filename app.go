@@ -42,7 +42,9 @@ type Application struct {
 	paths     map[PathName]string
 	// stateStore is the WindowStateStore, or nil for the file.
 	stateStore WindowStateStore
-	finished   sync.Once
+	// locale is the tag SetLocale set, or "" to follow the system.
+	locale   string
+	finished sync.Once
 
 	// quitting is only touched on the main thread.
 	quitting    bool
@@ -65,6 +67,7 @@ type Application struct {
 	onWindowCreated   listeners[func(*Window)]
 
 	onNotificationClick listeners[func(string)]
+	onLocaleChanged     listeners[func(string)]
 }
 
 // App is the application singleton.
@@ -395,9 +398,48 @@ func (a *Application) SetBadgeCount(n int) {
 	a.Dock.SetBadge(label)
 }
 
-// Locale returns the user's preferred locale, e.g. "en-US".
+// Locale returns the locale the app shows: the tag SetLocale set, or the
+// user's preferred locale, e.g. "en-US".
 func (a *Application) Locale() string {
-	return onMainValue(func() string { return backend().App().Locale() })
+	return onMainValue(func() string { return a.localeInEffect() })
+}
+
+// SetLocale makes tag, a language tag such as "zh-Hans" or "zh-Hant-TW",
+// the locale the app shows, from any goroutine: the controls of the native
+// UI say their own texts in its language, and OnLocaleChanged tells the app
+// to say its own in it. An empty tag follows the user's preferred locale
+// again, which is the default.
+func (a *Application) SetLocale(tag string) {
+	tag = strings.TrimSpace(tag)
+	a.mu.Lock()
+	if a.locale == tag {
+		a.mu.Unlock()
+		return
+	}
+	a.locale = tag
+	a.mu.Unlock()
+	postMain(func() {
+		contentLocaleChanged()
+		fire1(&a.onLocaleChanged, a.localeInEffect())
+	})
+}
+
+// OnLocaleChanged is called with the locale the app shows when SetLocale
+// changes it. It returns a function that stops the listener.
+func (a *Application) OnLocaleChanged(fn func(locale string)) (off func()) {
+	return a.onLocaleChanged.add(fn, false)
+}
+
+// localeInEffect returns the locale the app shows: SetLocale's, or the
+// user's preferred locale. Main thread only.
+func (a *Application) localeInEffect() string {
+	a.mu.Lock()
+	tag := a.locale
+	a.mu.Unlock()
+	if tag != "" {
+		return tag
+	}
+	return backend().App().Locale()
 }
 
 // AboutPanelOptions customizes the standard about panel.

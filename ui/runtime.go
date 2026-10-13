@@ -41,6 +41,9 @@ type host interface {
 	escape()
 	isDark() bool
 	preferences() platform.Preferences
+	// locale returns the locale the app shows: App.SetLocale's, or the
+	// user's preferred locale.
+	locale() string
 	titleBar() TitleBar
 	// vibrancy reports whether the window shows a material where the
 	// frames are transparent.
@@ -376,6 +379,10 @@ func (rt *engine) themeChanged() {
 	rt.redraw, rt.repaintDue = false, time.Time{}
 	rt.host.requestFrame()
 }
+
+// locale returns the locale the app shows, which App.SetLocale sets, or the
+// user's preferred locale.
+func (rt *engine) locale() string { return rt.host.locale() }
 
 // runFrame builds, lays out, paints and presents a frame.
 func (rt *engine) runFrame() {

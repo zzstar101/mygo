@@ -508,6 +508,13 @@ func (h *windowHost) preferences() platform.Preferences {
 	return h.conn.Preferences()
 }
 
+func (h *windowHost) locale() string {
+	if h.conn.Locale == nil {
+		return ""
+	}
+	return h.conn.Locale()
+}
+
 func (h *windowHost) titleBar() TitleBar {
 	if h.conn.TitleBar == nil {
 		return TitleBar{}
