@@ -243,9 +243,11 @@ type ThemePreferences struct {
 type ThemeModule struct {
 	mu        sync.Mutex
 	source    ThemeSource
-	prefs     ThemePreferences
-	prefsOK   bool
 	onUpdated listeners[func()]
+
+	// The preferences read last, until the next change. Main thread only.
+	prefs   ThemePreferences
+	prefsOK bool
 }
 
 // Theme is the system appearance. Pages follow it through the
@@ -294,8 +296,6 @@ func (t *ThemeModule) TextScale() float64 { return t.Preferences().TextScale }
 // read can call out to the desktop (the settings portal on Linux), so it is
 // kept until the next change, as package ui keeps it. Main thread only.
 func (t *ThemeModule) preferences() ThemePreferences {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if !t.prefsOK {
 		t.prefs = themePreferences(backend().Theme().Preferences())
 		t.prefsOK = true
@@ -361,15 +361,14 @@ func (t *ThemeModule) apply() {
 	}
 }
 
-// OnUpdated is called when the effective appearance changes.
+// OnUpdated is called when the effective appearance, or the desktop's
+// preferences (Preferences), change.
 func (t *ThemeModule) OnUpdated(fn func()) (off func()) { return t.onUpdated.add(fn, false) }
 
 // changed forgets the preferences read before and tells the listeners that
 // the system appearance changed. Main thread only.
 func (t *ThemeModule) changed() {
-	t.mu.Lock()
 	t.prefs, t.prefsOK = ThemePreferences{}, false
-	t.mu.Unlock()
 	fire(&t.onUpdated)
 }
 

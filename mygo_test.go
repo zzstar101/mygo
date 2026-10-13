@@ -1755,6 +1755,7 @@ var needsAppCalls = []struct {
 	{"Screen.DisplayNearestPoint", func() { Screen.DisplayNearestPoint(Point{}) }},
 	{"Screen.DisplayMatching", func() { Screen.DisplayMatching(Rectangle{}) }},
 	{"Theme.IsDark", func() { Theme.IsDark() }},
+	{"Theme.Preferences", func() { Theme.Preferences() }},
 	{"GlobalShortcut.Register", func() { GlobalShortcut.Register("CmdOrCtrl+Shift+K", func() {}) }},
 	{"NewTray", func() { NewTray(TrayOptions{}) }},
 	{"NotificationsSupported", func() { NotificationsSupported() }},
