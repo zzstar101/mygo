@@ -1,5 +1,7 @@
 // Package i18n matches the languages an app has to the locale of the
-// desktop, and formats values for it.
+// desktop, and formats values for it: a count with the plural of the
+// language, a number with its separators and its digits, a date and a time
+// of day with its patterns.
 //
 // MyGo itself has its own strings, of the controls package ui draws, in the
 // languages App.SetLocale speaks; an app's own strings are its own. Match
