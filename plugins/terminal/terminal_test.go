@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"image/png"
 	"os"
@@ -1038,6 +1040,106 @@ func TestOnScrollTakesTheWheel(t *testing.T) {
 	tt.Scroll(100, 100, 0, -40)
 	if !slices.Equal(seen, []int{-3, 3, -3}) {
 		t.Errorf("OnScroll saw %v without alternate scroll", seen)
+	}
+}
+
+// A program that reads the clipboard itself (mode 5522) is told what a
+// paste offers and reads the image with the event's password; a
+// terminal that did not paste, as another window of the program, answers
+// nothing; without the mode the text is pasted, bracketed.
+func TestPasteImage(t *testing.T) {
+	loadLib(t)
+	image := bytes.Repeat([]byte("\x89PNG\r\n\x1a\nxyz"), 1000)
+	conn := newPipe()
+	var mu sync.Mutex
+	var statuses []string
+	var term *Terminal
+	var err error
+	term, err = New(Options{Conn: conn, OnPasteStatus: func(s PasteStatus, sent, total int) {
+		term.Title() // the terminal is not locked
+		mu.Lock()
+		statuses = append(statuses, fmt.Sprint(s, sent == total && total > 0))
+		mu.Unlock()
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	tt.SetClipboard("some text")
+	tt.SetClipboardImage(image)
+	pasteMods := ui.Ctrl | ui.Shift
+	if runtime.GOOS == "darwin" {
+		pasteMods = ui.Super
+	}
+
+	term.Feed([]byte("\x1b[?5522h"))
+	tt.Key(pasteMods, ui.KeyV)
+	event := conn.take(1)
+	_, after, ok := strings.Cut(event, ":pw=")
+	if !ok || !strings.HasSuffix(event, "\x1b\\") {
+		t.Fatalf("paste sent %q, want a paste event", event)
+	}
+	pw := after[:strings.Index(after, "\x1b")]
+	listing, _ := base64.StdEncoding.DecodeString(event[strings.Index(event, "Lg==:pw="+pw+";")+len("Lg==:pw="+pw+";") : strings.Index(event, "\x1b\\\x1b]5522;type=read:status=DONE")])
+	if string(listing) != "image/png text/plain\n" {
+		t.Errorf("offered %q", listing)
+	}
+
+	name := base64.StdEncoding.EncodeToString([]byte("Paste event"))
+	mime := base64.StdEncoding.EncodeToString([]byte("image/png"))
+	read := "\x1b]5522;type=read:pw=" + pw + ":name=" + name + ";" + mime + "\x1b\\"
+	term.Feed([]byte(read))
+	reply := conn.take(len(image) * 4 / 3)
+	var got []byte
+	for _, pkt := range strings.Split(reply, "\x1b\\") {
+		if _, data, ok := strings.Cut(pkt, "status=DATA:mime="+mime+";"); ok {
+			b, err := base64.StdEncoding.DecodeString(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, b...)
+		}
+	}
+	if !bytes.Equal(got, image) || !strings.HasSuffix(reply, "status=DONE\x1b\\") {
+		t.Errorf("the program read %d bytes of %d; reply ends %q", len(got), len(image), reply[max(0, len(reply)-40):])
+	}
+
+	// Another terminal of the same program (a mirror) sees the read too,
+	// and must not answer it.
+	conn2 := newPipe()
+	other, err := New(Options{Conn: conn2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	other.Feed([]byte("\x1b[?5522h" + read))
+	if sent := conn2.take(1); sent != "" {
+		t.Errorf("a terminal that did not paste answered %q", sent)
+	}
+
+	// Without the mode, the text, bracketed when asked.
+	term.Feed([]byte("\x1b[?5522l\x1b[?2004h"))
+	tt.Key(pasteMods, ui.KeyV)
+	if sent := conn.take(1); sent != "\x1b[200~some text\x1b[201~" {
+		t.Errorf("without the mode, pasted %q", sent)
+	}
+	// Only an image, and no program to read it: nothing, and told so.
+	tt.SetClipboard("")
+	tt.Key(pasteMods, ui.KeyV)
+	if sent := conn.take(1); sent != "" {
+		t.Errorf("with only an image and no mode, pasted %q", sent)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	seen := strings.Join(statuses, " ")
+	mu.Unlock()
+	// Offered, sending from nothing, then pieces, the last of them all sent;
+	// then the unsupported paste.
+	if !strings.HasPrefix(seen, fmt.Sprint(PasteOffered, false)+" "+fmt.Sprint(PasteSending, false)) ||
+		!strings.Contains(seen, fmt.Sprint(PasteSent, true)) || !strings.HasSuffix(seen, fmt.Sprint(PasteUnsupported, false)) {
+		t.Errorf("statuses %q", seen)
 	}
 }
 

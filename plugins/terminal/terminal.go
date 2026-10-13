@@ -31,6 +31,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -109,6 +110,13 @@ type Options struct {
 	OnExit   func(code int)
 	OnBell   func()
 	OnNotify func(title, body string)
+	// OnPasteStatus tells how a paste of what a program reads itself
+	// (mode 5522) goes, on a goroutine of the terminal: offered, then
+	// sending with the bytes sent so far of the total, then sent; or not
+	// taken when the program does not read within a moment; or
+	// unsupported when the clipboard holds only an image and the program
+	// does not read the clipboard, so nothing is pasted.
+	OnPasteStatus func(status PasteStatus, sent, total int)
 
 	// OpenLink takes what a Command+click (Control+click elsewhere)
 	// opens: a hyperlink (OSC 8), a URL printed as text, or, only with
@@ -161,6 +169,23 @@ const (
 	CursorUnderline
 )
 
+// PasteStatus is how a paste a program reads itself goes (OnPasteStatus).
+type PasteStatus int
+
+const (
+	// PasteOffered: the program was told what the clipboard holds.
+	PasteOffered PasteStatus = iota
+	// PasteSending: the program reads it; sent bytes of total went so far.
+	PasteSending
+	// PasteSent: all of it went.
+	PasteSent
+	// PasteNotTaken: the program did not read it within a moment.
+	PasteNotTaken
+	// PasteUnsupported: only an image was there and the program does not
+	// read the clipboard: nothing was pasted.
+	PasteUnsupported
+)
+
 // Terminal is a terminal emulator and the program it runs. Its methods are
 // safe from any goroutine.
 type Terminal struct {
@@ -174,6 +199,15 @@ type Terminal struct {
 	events  events
 	closed  bool
 	clipOut []string // what programs copied, for the view to write
+	// offered is what the last paste offered a program that reads the
+	// clipboard itself (mode 5522), by MIME type, until it reads it.
+	offered map[string][]byte
+	// sending is the size of a paste's reply the program reads next,
+	// which WritePTY sends in pieces that report their progress; notTaken
+	// tells after a moment that the program did not read what was
+	// offered.
+	sending  int
+	notTaken *time.Timer
 	// src is the program's pseudo-terminal, or Conn: nil until the
 	// program starts, from launch, its options.
 	src    io.ReadWriteCloser
@@ -229,7 +263,39 @@ func New(opts Options) (*Terminal, error) {
 	t.size = gridSize{80, 24, 8, 16}
 	var err error
 	t.term, err = vt.NewTerminal(80, 24, vt.Effects{
-		WritePTY:     func(p []byte) { t.in.push(append([]byte(nil), p...)) },
+		WritePTY: func(p []byte) {
+			if t.sending == 0 {
+				t.in.push(append([]byte(nil), p...))
+				return
+			}
+			// A paste's reply: in pieces, each telling how far it went
+			// once written, which a slow link makes worth watching.
+			total, sent := t.sending, 0
+			t.sending = 0
+			// Told from the queue's goroutine, as the pieces are: here the
+			// terminal is locked, which OnPasteStatus may need.
+			t.in.pushDone(nil, func() {
+				if on := t.opts.OnPasteStatus; on != nil {
+					on(PasteSending, 0, total)
+				}
+			})
+			for len(p) > 0 {
+				n := min(len(p), 64<<10)
+				piece := append([]byte(nil), p[:n]...)
+				p = p[n:]
+				sent += n
+				last, done := len(p) == 0, sent
+				t.in.pushDone(piece, func() {
+					if on := t.opts.OnPasteStatus; on != nil {
+						if last {
+							on(PasteSent, total, total)
+						} else {
+							on(PasteSending, min(done, total), total)
+						}
+					}
+				})
+			}
+		},
 		Bell:         func() { t.events.bells++ },
 		TitleChanged: func() { t.events.title = true },
 		RenderHold:   t.renderHold,
@@ -239,6 +305,33 @@ func New(opts Options) (*Terminal, error) {
 				t.redraw()
 			}
 			return !primary
+		},
+		ClipboardRead: func(req vt.ClipboardRead) (vt.ClipboardReply, bool) {
+			// Only what a paste offered, for the program the paste told;
+			// any other read goes unanswered, as other windows of the
+			// same program may be the ones to answer.
+			if !req.Granted || t.offered == nil {
+				return vt.ClipboardReply{}, false
+			}
+			if t.notTaken != nil {
+				t.notTaken.Stop()
+				t.notTaken = nil
+			}
+			reply := vt.ClipboardReply{Contents: t.offered}
+			total := 0
+			for _, mime := range req.Mimes {
+				total += len(t.offered[mime])
+			}
+			if req.List {
+				for mime := range t.offered {
+					reply.Available = append(reply.Available, mime)
+				}
+				slices.Sort(reply.Available)
+			}
+			t.offered = nil
+			// The reply, base64, comes to WritePTY next.
+			t.sending = total * 4 / 3
+			return reply, true
 		},
 		Size: func() (int, int, int, int) { return t.size.cols, t.size.rows, t.size.cellW, t.size.cellH },
 		Dark: func() bool { return t.curTheme == nil || t.curTheme.dark() },
@@ -589,16 +682,70 @@ func (t *Terminal) Send(data []byte) {
 // Paste pastes text, bracketed when the program asks (mode 2004), so that
 // it does not run as commands as it would typed.
 func (t *Terminal) Paste(text string) {
+	t.PasteClipboard(map[string][]byte{"text/plain": []byte(text)})
+}
+
+// PasteClipboard pastes what the clipboard holds, by MIME type. A program
+// that reads the clipboard itself (mode 5522, the Kitty clipboard
+// protocol, as programs that take images do) is told what there is and
+// reads what it wants; any other gets the text, bracketed when it asks
+// (mode 2004), so that it does not run as commands as it would typed.
+func (t *Terminal) PasteClipboard(contents map[string][]byte) {
 	t.mu.Lock()
 	if t.term == nil {
 		t.mu.Unlock()
 		return
 	}
-	data := vt.EncodePaste(text, t.term.Mode(vt.ModeBracketedPaste))
+	var data []byte
+	mimes := make([]string, 0, len(contents))
+	for mime, b := range contents {
+		if len(b) > 0 {
+			mimes = append(mimes, mime)
+		}
+	}
+	slices.Sort(mimes)
+	t.offered = contents
+	on := t.opts.OnPasteStatus
+	var status PasteStatus = -1
+	if t.term.PasteEvent(mimes) {
+		status = PasteOffered
+		if t.notTaken != nil {
+			t.notTaken.Stop()
+		}
+		t.notTaken = time.AfterFunc(3*time.Second, func() {
+			t.mu.Lock()
+			taken := t.offered == nil
+			t.offered = nil
+			t.mu.Unlock()
+			if on != nil && !taken {
+				on(PasteNotTaken, 0, 0)
+			}
+		})
+	} else {
+		t.offered = nil
+		text := contents["text/plain"]
+		if len(text) == 0 && len(mimes) > 0 {
+			status = PasteUnsupported
+		}
+		data = vt.EncodePaste(string(text), t.term.Mode(vt.ModeBracketedPaste))
+	}
 	t.term.ScrollToBottom()
 	t.mu.Unlock()
 	t.Send(data)
 	t.redraw()
+	if on != nil && status >= 0 {
+		// Once what the paste sent is written, from the queue's
+		// goroutine as the other statuses.
+		t.in.pushDone(nil, func() { on(status, 0, 0) })
+	}
+}
+
+// readsClipboard reports whether the program reads the clipboard itself
+// (mode 5522), as a paste then offers it the clipboard's image.
+func (t *Terminal) readsClipboard() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.term != nil && t.term.Mode(vt.ModePasteEvents)
 }
 
 // Feed shows data as if the program wrote it: text and escape sequences.
@@ -777,8 +924,14 @@ func unhex(c byte) (byte, bool) {
 type inputQueue struct {
 	mu     sync.Mutex
 	cond   *sync.Cond
-	queue  [][]byte
+	queue  []queued
 	closed bool
+}
+
+// queued is input to write, and what to run once it is written.
+type queued struct {
+	p    []byte
+	done func()
 }
 
 func (q *inputQueue) init() {
@@ -787,11 +940,15 @@ func (q *inputQueue) init() {
 	}
 }
 
-func (q *inputQueue) push(p []byte) {
+func (q *inputQueue) push(p []byte) { q.pushDone(p, nil) }
+
+// pushDone queues p, and done to run once it is written, on the queue's
+// goroutine.
+func (q *inputQueue) pushDone(p []byte, done func()) {
 	q.mu.Lock()
 	q.init()
 	if !q.closed {
-		q.queue = append(q.queue, p)
+		q.queue = append(q.queue, queued{p, done})
 		q.cond.Signal()
 	}
 	q.mu.Unlock()
@@ -817,12 +974,17 @@ func (q *inputQueue) run(w io.Writer) {
 			q.mu.Unlock()
 			return
 		}
-		p := q.queue[0]
+		item := q.queue[0]
 		q.queue = q.queue[1:]
 		q.mu.Unlock()
-		if _, err := w.Write(p); err != nil {
+		if len(item.p) == 0 {
+			// Only something to run, in its place among the writes.
+		} else if _, err := w.Write(item.p); err != nil {
 			q.close()
 			return
+		}
+		if item.done != nil {
+			item.done()
 		}
 	}
 }

@@ -23,9 +23,11 @@ type headless struct {
 	dark      bool
 	prefs     platform.Preferences
 	clipboard string
-	cursor    Cursor
-	ime       platform.TextInputState
-	opened    []string
+	// clipboardImage is the clipboard's image as PNG, for tests.
+	clipboardImage []byte
+	cursor         Cursor
+	ime            platform.TextInputState
+	opened         []string
 	// escapes counts the Escapes nothing handled.
 	escapes int
 	openErr error
@@ -86,6 +88,9 @@ func (h *headless) readClipboard() string {
 	}
 	return h.clipboard
 }
+
+// readClipboardImage gives the image a test set with SetClipboardImage.
+func (h *headless) readClipboardImage() []byte { return h.clipboardImage }
 
 func (h *headless) startDataDrag(d transfer.Data, local any, o transfer.DragOptions, x, y float32) error {
 	h.dragData, h.dragLocal, h.dragOptions = d.Snapshot(), local, o
@@ -511,6 +516,9 @@ func (t *Tester) Clipboard() string { return t.h.clipboard }
 
 // SetClipboard sets the clipboard's text.
 func (t *Tester) SetClipboard(s string) { t.h.clipboard = s }
+
+// SetClipboardImage sets the clipboard's image, as PNG.
+func (t *Tester) SetClipboardImage(png []byte) { t.h.clipboardImage = png }
 
 // Cursor returns the pointer shape the view shows.
 func (t *Tester) Cursor() Cursor { return t.h.cursor }

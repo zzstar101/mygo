@@ -74,6 +74,9 @@ type window struct {
 	downloads     map[id][2]string // WKDownload: URL and path
 	attention     int              // the request of FlashFrame
 	maximized     bool
+	// auxiliary tells that SetVisibleOnAllWorkspaces made a window that
+	// cannot go full screen an auxiliary of full-screen Spaces, to undo.
+	auxiliary     bool
 	programmatic  bool
 	closed        bool
 	sheet         bool
@@ -799,8 +802,20 @@ func (w *window) SetVisibleOnAllWorkspaces(v bool) {
 	behavior := uint(sendInt(w.win, "collectionBehavior"))
 	if v {
 		behavior |= canJoinAllSpaces
+		// FullScreenNone (DisableFullScreen) also keeps a window out of
+		// other apps' full-screen Spaces. As an auxiliary, the window shows
+		// there too (an accessory app's: macOS shows no regular app's
+		// windows there), and still cannot go full screen itself.
+		if behavior&collectionFullScreenNone != 0 {
+			behavior = behavior&^collectionFullScreenNone | collectionFullScreenAuxiliary
+			w.auxiliary = true
+		}
 	} else {
 		behavior &^= canJoinAllSpaces
+		if w.auxiliary {
+			behavior = behavior&^collectionFullScreenAuxiliary | collectionFullScreenNone
+			w.auxiliary = false
+		}
 	}
 	send(w.win, "setCollectionBehavior:", uintptr(behavior))
 }

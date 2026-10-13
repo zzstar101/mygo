@@ -18,3 +18,7 @@ func (w *Window) sendTitleBar() {}
 func (w *Window) handleMessage(msg string) {}
 
 func findScript(text string, opts FindOptions) string { return "" }
+
+func preferencesScript() string { return "" }
+
+func sendPreferences() {}

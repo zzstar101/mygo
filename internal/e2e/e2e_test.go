@@ -242,6 +242,7 @@ var beforeRunCalls = []struct {
 }{
 	{"Clipboard.ReadText", func() { mygo.Clipboard.ReadText() }},
 	{"Theme.IsDark", func() { mygo.Theme.IsDark() }},
+	{"Theme.Preferences", func() { mygo.Theme.Preferences() }},
 	{"Dialog.Message", func() { mygo.Dialog.Message(mygo.MessageOptions{Message: "Too early"}) }},
 	{"NewTray", func() { mygo.NewTray(mygo.TrayOptions{}) }},
 }
@@ -620,6 +621,36 @@ func TestEvalForms(t *testing.T) {
 	var evalErr *mygo.EvalError
 	if _, err := w.Page().Eval("throw new Error('boom')"); !errors.As(err, &evalErr) || evalErr.Message != "boom" {
 		t.Errorf("Eval(throw) = %v", err)
+	}
+}
+
+// TestThemePreferencesReachThePage checks the whole path from the desktop
+// to a real page: the accent color and the settings of accessibility as
+// the CSS variables of :root, which the page reads. Which accent a CI
+// desktop has is unknown, so the page is compared with Go, not fixed.
+// A live change of the desktop's settings is not testable here: only the
+// desktop can make one, and the way it tells the app is per platform.
+func TestThemePreferencesReachThePage(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Hidden: true})
+	w.Page().LoadHTML("<p>preferences</p>", "")
+	read := func(name string) string {
+		t.Helper()
+		v, err := mygo.EvalAs[string](w.Page(), `getComputedStyle(document.documentElement).getPropertyValue("`+name+`").trim()`)
+		if err != nil {
+			t.Fatalf("reading %s: %v; %s", name, err, pageState(w.Page()))
+		}
+		return v
+	}
+	waitFor(t, w, `getComputedStyle(document.documentElement).getPropertyValue("--mygo-text-scale").trim()`)
+	if got, want := read("--mygo-text-scale"), fmt.Sprint(mygo.Theme.TextScale()); got != want {
+		t.Errorf("--mygo-text-scale = %q, want %q", got, want)
+	}
+	want := ""
+	if c := mygo.Theme.AccentColor(); c.A != 0 {
+		want = c.String()
+	}
+	if got := read("--mygo-accent"); got != want {
+		t.Errorf("--mygo-accent = %q, want %q", got, want)
 	}
 }
 
@@ -1429,6 +1460,36 @@ func TestWindowExtras(t *testing.T) {
 	}
 	if w.Title() != "Extras" {
 		t.Error("the window broke")
+	}
+}
+
+// A window that cannot go full screen is an auxiliary of full-screen Spaces
+// while it is visible on all workspaces, which lets an accessory app show it
+// over other apps in full screen (#309), and it still cannot go full screen
+// itself.
+func TestVisibleOnAllWorkspacesWithoutFullScreen(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Title: "Overlay", Width: 300, Height: 120, AlwaysOnTop: true, DisableFullScreen: true})
+	const auxiliary, none = 1 << 8, 1 << 9 // NSWindowCollectionBehaviorFullScreen…
+	b, ok := collectionBehavior(w)
+	if !ok {
+		t.Skip("collection behaviors are macOS's")
+	}
+	if b&none == 0 {
+		t.Fatalf("DisableFullScreen: behavior %#x lacks FullScreenNone", b)
+	}
+	w.SetVisibleOnAllWorkspaces(true)
+	if b, _ = collectionBehavior(w); b&auxiliary == 0 || b&none != 0 {
+		t.Errorf("visible on all workspaces: behavior %#x, want FullScreenAuxiliary without FullScreenNone", b)
+	}
+	w.SetFullScreen(true)
+	time.Sleep(1500 * time.Millisecond) // longer than the full-screen animation
+	if w.IsFullScreen() {
+		w.SetFullScreen(false)
+		t.Error("a window with DisableFullScreen went full screen")
+	}
+	w.SetVisibleOnAllWorkspaces(false)
+	if b, _ = collectionBehavior(w); b&none == 0 || b&auxiliary != 0 {
+		t.Errorf("no longer on all workspaces: behavior %#x, want FullScreenNone back", b)
 	}
 }
 

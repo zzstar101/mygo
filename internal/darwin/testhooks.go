@@ -221,6 +221,11 @@ func TestWebViewAttached(handle uintptr) bool {
 	return w != nil && send(w.web, "window") == w.win
 }
 
+// TestCollectionBehavior returns a window's NSWindowCollectionBehavior.
+func TestCollectionBehavior(handle uintptr) uint {
+	return uint(sendInt(id(handle), "collectionBehavior"))
+}
+
 // TestDockInspector opens the web inspector of a window docked to it, and
 // reports whether the window has one.
 func TestDockInspector(handle uintptr) bool {

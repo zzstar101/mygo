@@ -28,6 +28,9 @@ func sideButton(*mygo.Window, bool) bool { return false }
 
 func webViewAttached(*mygo.Window) (bool, bool) { return false, false }
 
+// Collection behaviors are macOS's.
+func collectionBehavior(*mygo.Window) (uint, bool) { return 0, false }
+
 func dockDevTools(*mygo.Window) bool { return false }
 
 func dockedDevToolsPlace(*mygo.Window) string { return "" }

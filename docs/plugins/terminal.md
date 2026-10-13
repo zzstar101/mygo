@@ -65,7 +65,9 @@ The terminal does what terminal apps do:
   cursor;
 - mouse reports, focus reports, bracketed paste, synchronized output,
   hyperlinks (OSC 8), the title (OSC 0 and 2), the working directory
-  (OSC 7) and copying to the clipboard (OSC 52).
+  (OSC 7), copying to the clipboard (OSC 52), and paste events of the
+  Kitty clipboard protocol (OSC 5522, mode 5522), which let programs take
+  pasted images.
 
 ## Using it
 
@@ -79,6 +81,13 @@ The terminal does what terminal apps do:
   lines do not run as commands. The context menu has Copy, Paste, Select
   All and Clear Scrollback. Options add copying on select and Windows'
   keys (see [Options](#options)).
+- **Pasting images**: a program that reads the clipboard itself, as it
+  asks with mode 5522 (as coding agents that accept images do), is told
+  what a paste holds, the text and an image as PNG, and reads what it
+  wants, even over SSH. Only the terminal that pasted answers its read,
+  with what the clipboard held at the paste; other terminals showing the
+  same program, as other windows on a session, stay silent. Other
+  programs get the text alone, and an image alone pastes nothing.
 - **Scrolling**: the wheel and the touchpad scroll the scrollback, as do
   Shift+Page Up and Shift+Page Down. Full-screen programs get the wheel as
   arrow keys, or as mouse reports when they take the mouse. Typing scrolls
@@ -158,6 +167,14 @@ term, err := terminal.New(terminal.Options{
   image), and takes it by returning true: nothing is pasted. An app
   driving a remote shell uploads the clipboard's files this way and
   pastes their remote paths instead.
+- `OnPasteStatus` tells how a paste to a program that reads the clipboard
+  itself goes, on a goroutine of the terminal: `PasteOffered`, then
+  `PasteSending` with the bytes sent of the total as the program reads,
+  then `PasteSent`; or `PasteNotTaken` when the program does not read
+  within 3 seconds, or `PasteUnsupported` when the clipboard holds only an
+  image and the program does not read the clipboard. An app shows a large
+  image's progress over a slow link this way, and says why nothing
+  pasted.
 - `OnKey` sees a key press on the main thread before the terminal sends
   it, and takes it by returning true: neither the key nor the text it
   types reaches the program. Unlike a `Shortcut` around the view, which
@@ -267,6 +284,9 @@ selection-foreground = #1e1e2e
 The terminal's methods are safe from any goroutine:
 
 - `Send` sends bytes to the program as if typed, and `Paste` pastes text.
+  `PasteClipboard` pastes contents by MIME type, as the paste keys do: to
+  a program that reads the clipboard itself, all of them, else the
+  `text/plain` one.
 - `Feed` shows bytes as if the program wrote them, text and escape
   sequences.
 - `Title`, `Dir` (the directory the shell reported), `Size` (in cells) and

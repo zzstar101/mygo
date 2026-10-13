@@ -49,6 +49,9 @@ func drag(w *mygo.Window, points [][2]float64) (ok bool) {
 
 func webViewAttached(*mygo.Window) (bool, bool) { return false, false }
 
+// Collection behaviors are macOS's.
+func collectionBehavior(*mygo.Window) (uint, bool) { return 0, false }
+
 // WebView2 opens DevTools in a window of its own.
 func dockDevTools(*mygo.Window) bool { return false }
 

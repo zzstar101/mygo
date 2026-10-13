@@ -60,6 +60,11 @@ func webViewAttached(w *mygo.Window) (attached bool, supported bool) {
 	return attached, true
 }
 
+func collectionBehavior(w *mygo.Window) (behavior uint, supported bool) {
+	mygo.RunOnMain(func() { behavior = darwin.TestCollectionBehavior(w.NativeHandle()) })
+	return behavior, true
+}
+
 func dockDevTools(w *mygo.Window) (ok bool) {
 	mygo.RunOnMain(func() { ok = darwin.TestDockInspector(w.NativeHandle()) })
 	return ok

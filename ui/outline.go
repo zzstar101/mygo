@@ -23,7 +23,10 @@ type OutlineState[K comparable] struct {
 	List ListState
 	// Open holds the items showing their children.
 	Open Selection[K]
-	rows []outlineRow[K]
+	// Indent is the width each level adds before a row's arrow, the
+	// theme's Space(4) when zero.
+	Indent float32
+	rows   []outlineRow[K]
 }
 
 // outlineRow is a row of an outline: its item, how deep it is, the row of
@@ -155,7 +158,11 @@ func (s *OutlineState[K]) prefix(c *context, i int, children func(K) []K, conten
 		}
 	}
 	if r.depth > 0 {
-		coreBox(c).Width(float32(r.depth) * t.Space(4)).Shrink(0)
+		indent := s.Indent
+		if indent <= 0 {
+			indent = t.Space(4)
+		}
+		coreBox(c).Width(float32(r.depth) * indent).Shrink(0)
 	}
 	arrow := coreBox(c).Size(t.Space(4), t.Space(4)).Shrink(0).Role(RoleNone)
 	if r.branch {
