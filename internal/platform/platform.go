@@ -88,11 +88,21 @@ type Backend interface {
 	Network() Network
 	// Secrets may be called before Init, from any goroutine.
 	Secrets() Secrets
+	// Applications lists the applications installed on the computer.
+	// Unlike other methods it may be called from any goroutine once Init
+	// returned: it reads the disk, which the core does off the main thread.
+	Applications() ([]Application, error)
 
 	// NewFileWatch starts watching files, with no target yet. notify is
 	// called on a goroutine of the backend, one notice at a time.
 	// NewFileWatch may be called before Init, from any goroutine.
 	NewFileWatch(notify func(FileWatchNotice)) (FileWatch, error)
+	// ReplaceFile replaces the file at target with the file at
+	// replacement, in the same directory, keeping what the system keeps of
+	// the target's metadata (permissions, owner, extended attributes,
+	// creation date); replacement is gone afterwards. It may be called
+	// before Init, from any goroutine.
+	ReplaceFile(target, replacement string) error
 
 	NewTray(h TrayHandler) (Tray, error)
 	RegisterHotkey(id int, accelerator string) error
@@ -168,6 +178,11 @@ type AppController interface {
 	// ClearBrowsingData deletes the data pages stored; done runs on the
 	// main thread.
 	ClearBrowsingData(done func(error))
+	// Cookie operations address the default page store. Calls and exactly-once
+	// completions run on main; ListCookies returns independent Go values.
+	ListCookies(done func([]Cookie, error))
+	SetCookie(cookie Cookie, done func(error))
+	DeleteCookie(key CookieKey, done func(error))
 	ShowAboutPanel(opts AboutPanelOptions)
 	Locale() string
 	// RegisterURLScheme makes the app, identified by id (its identifier)
@@ -269,6 +284,11 @@ type WindowOptions struct {
 	// takes the keyboard. Show of a flyout that is not focusable shows it
 	// without the keyboard, as ShowInactive.
 	Flyout *Flyout
+	// Panel makes the window a panel (mygo.WindowOptions.Panel): it floats
+	// above the windows of all apps on the current workspace, full-screen
+	// ones included, out of the taskbar and the app switcher, and on macOS
+	// takes the keyboard without activating the app.
+	Panel bool
 
 	// UserScripts are injected into every page, in order.
 	UserScripts []UserScript
@@ -308,6 +328,14 @@ type Window interface {
 
 	SetTitle(title string)
 	Title() string
+	// SetRepresentedFile shows the file a window shows, "" for none: the
+	// proxy icon of the title bar and its menu of folders (macOS). Other
+	// platforms do nothing.
+	SetRepresentedFile(path string)
+	// SetDocumentEdited shows that the window's document has unsaved
+	// changes: the dot of the close button (macOS). Other platforms do
+	// nothing; the core marks the title there.
+	SetDocumentEdited(edited bool)
 	SetBounds(r Rect)
 	Bounds() Rect
 	SetContentBounds(r Rect)
@@ -719,6 +747,18 @@ type Shell interface {
 	ShowItemInFolder(path string)
 	TrashItem(path string) error
 	Beep()
+	// FileIcon returns the icon the file manager shows for a file, a
+	// folder or an application, as a PNG image of size by size pixels.
+	FileIcon(path string, size int) ([]byte, error)
+	// OpenApplication starts the application at Application.Path, or
+	// brings it to the front.
+	OpenApplication(path string) error
+}
+
+// Application is an installed application (Backend.Applications): Path is
+// where FileIcon finds its icon and OpenApplication starts it.
+type Application struct {
+	Name, ID, Path string
 }
 
 // Display describes a monitor.

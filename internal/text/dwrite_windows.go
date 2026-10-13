@@ -156,6 +156,7 @@ const (
 	layoutSetFontWeight        = 32
 	layoutSetFontStyle         = 33
 	layoutSetFontSize          = 35
+	layoutSetInlineObject      = 39
 	layoutSetTypography        = 40
 	layoutDraw                 = 58
 	layoutGetLineMetrics       = 59
@@ -811,6 +812,16 @@ func (e *dwrite) shape(text []rune, style Style, spans []Span, width float32, rt
 		call(layout, layoutHitTestTextPosition, uintptr(r.pos), 0, uintptr(unsafe.Pointer(&x)), uintptr(unsafe.Pointer(&y)), uintptr(unsafe.Pointer(&hit)))
 		lines[li].runs = append(lines[li].runs, e.run(r, x, index))
 	}
+	if len(layoutObjects.objects) > 0 {
+		units := make([]uint32, len(text)+1)
+		for i, r := range text {
+			units[i+1] = units[i] + 1
+			if r >= 0x10000 {
+				units[i+1]++
+			}
+		}
+		objectRuns(layout, lines, ends, spans, units, index)
+	}
 	return lines
 }
 
@@ -859,6 +870,7 @@ func (e *dwrite) typeset(layout uintptr, style Style, spans []Span, text []rune)
 		e.spacing(layout, sp.LetterSpacing, r)
 		e.typography(layout, sp.Features, r)
 	}
+	setObjects(layout, spans, units)
 }
 
 // spacing adds letter spacing to a range of a text layout.

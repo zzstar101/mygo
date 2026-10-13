@@ -2,10 +2,13 @@ package mygo
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"image/png"
 	"math"
 	"runtime"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/egoist/mygo/internal/accelerator"
@@ -44,6 +47,83 @@ func (ShellModule) ShowItemInFolder(path string) {
 func (ShellModule) TrashItem(path string) error {
 	needsApp("Shell.TrashItem")
 	return onMainValue(func() error { return backend().Shell().TrashItem(path) })
+}
+
+// FileIcon returns the icon the file manager shows for a file, a folder or
+// an application, as a PNG image of size by size pixels: pass the size in
+// DIPs times the display's scale factor for a sharp icon. On Windows path
+// may also name a shell item, such as an app of the Start menu by its
+// shell:AppsFolder\<AppUserModelID> path; on Linux, the icon of a desktop
+// entry (.desktop) is its application's, from the icon theme. It fails
+// in browsers.
+func (ShellModule) FileIcon(path string, size int) ([]byte, error) {
+	needsApp("Shell.FileIcon")
+	if size <= 0 {
+		return nil, errors.New("mygo: Shell.FileIcon: size must be positive")
+	}
+	var png []byte
+	err := onMainValue(func() (err error) {
+		png, err = backend().Shell().FileIcon(path, size)
+		return err
+	})
+	return png, err
+}
+
+// InstalledApp is an application installed on the computer, which
+// Shell.InstalledApps lists.
+type InstalledApp struct {
+	// Name is the name the system shows for it, in the user's language.
+	Name string
+	// ID identifies it: its bundle identifier on macOS (or its path for a
+	// bundle without one), its AppUserModelID on Windows (for a desktop
+	// app without one, its path under a known folder), and its desktop
+	// file ID on Linux, such as org.gnome.Nautilus.desktop.
+	ID string
+	// Path is where it is: its .app bundle on macOS, its item of the
+	// Applications folder on Windows (shell:AppsFolder\<ID>), and its
+	// desktop entry on Linux. Shell.FileIcon draws its icon.
+	Path string
+}
+
+// InstalledApps lists the applications installed on the computer, sorted
+// by name, as a launcher shows them:
+//
+//   - macOS: the .app bundles in /Applications, /System/Applications,
+//     ~/Applications and CoreServices' Applications, and in their
+//     folders (Utilities), plus Finder.
+//   - Windows: the Start menu's All apps, desktop and packaged apps
+//     alike (the shell's Applications folder).
+//   - Linux: the applications of the desktop entries menus show.
+//
+// It reads the disk: call it from a goroutine of its own, which it does not
+// block the main thread from. Browsers return an error.
+func (ShellModule) InstalledApps() ([]InstalledApp, error) {
+	needsApp("Shell.InstalledApps")
+	if !isMainThread() {
+		App.waitReady()
+	}
+	found, err := backend().Applications()
+	if err != nil {
+		return nil, err
+	}
+	apps := make([]InstalledApp, len(found))
+	for i, a := range found {
+		apps[i] = InstalledApp(a)
+	}
+	slices.SortStableFunc(apps, func(a, b InstalledApp) int {
+		return cmp.Or(strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), strings.Compare(a.Path, b.Path))
+	})
+	return apps, nil
+}
+
+// LaunchApp starts an application of InstalledApps, or brings it to the
+// front if it runs.
+func (ShellModule) LaunchApp(app InstalledApp) error {
+	needsApp("Shell.LaunchApp")
+	if app.Path == "" {
+		return errors.New("mygo: Shell.LaunchApp: the app has no path")
+	}
+	return onMainValue(func() error { return backend().Shell().OpenApplication(app.Path) })
 }
 
 // Beep plays the system alert sound.

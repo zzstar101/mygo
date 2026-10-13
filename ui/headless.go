@@ -23,6 +23,8 @@ type headless struct {
 	dark      bool
 	prefs     platform.Preferences
 	clipboard string
+	// clipboardData is what WriteClipboardData copied, with its formats.
+	clipboardData transfer.Data
 	// clipboardImage is the clipboard's image as PNG, for tests.
 	clipboardImage []byte
 	cursor         Cursor
@@ -81,7 +83,7 @@ func (h *headless) requestFrame()                              { h.requested.Sto
 func (h *headless) setCursor(c Cursor)                         { h.cursor = c }
 func (h *headless) setTextInput(t platform.TextInputState)     { h.ime = t }
 func (h *headless) updateAccessibility(t *platform.AccessTree) { h.keepAccess(t) }
-func (h *headless) writeClipboard(s string)                    { h.clipboard = s }
+func (h *headless) writeClipboard(s string)                    { h.clipboard, h.clipboardData = s, transfer.Data{} }
 func (h *headless) startDrag()                                 {}
 func (h *headless) setDropFormats([]transfer.Format)           {}
 func (h *headless) readClipboard() string {
@@ -90,6 +92,34 @@ func (h *headless) readClipboard() string {
 		r()
 	}
 	return h.clipboard
+}
+
+// readClipboardData reads the representations of formats of what was
+// copied, or the text of WriteClipboard.
+func (h *headless) readClipboardData(formats []transfer.Format) transfer.Data {
+	d := h.clipboardData
+	if len(d.Items()) == 0 && h.clipboard != "" {
+		d = transfer.TextData(h.clipboard)
+	}
+	if formats == nil {
+		return d
+	}
+	var reps []transfer.Representation
+	for _, f := range formats {
+		if b, err := d.Read(f); err == nil {
+			reps = append(reps, transfer.Bytes(f, b))
+		}
+	}
+	if len(reps) == 0 {
+		return transfer.Data{}
+	}
+	return transfer.New(transfer.NewItem(reps...))
+}
+
+func (h *headless) writeClipboardData(d transfer.Data) {
+	h.clipboardData = d.Snapshot()
+	b, _ := d.Read(transfer.Text)
+	h.clipboard = string(b)
 }
 
 // readClipboardImage gives the image a test set with SetClipboardImage.
@@ -512,7 +542,8 @@ func (t *Tester) Compose(text string, caret int) {
 }
 
 // Command performs an edit command of the menus, as Copy of the Edit menu:
-// "copy", "cut", "paste", "selectAll", "undo", "redo" or "delete".
+// "copy", "cut", "paste", "pasteAndMatchStyle", "selectAll", "undo",
+// "redo" or "delete", or a Format menu's, as "bold" or "alignCenter".
 func (t *Tester) Command(name string) {
 	t.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name})
 }
@@ -529,7 +560,18 @@ func (t *Tester) TextCaret() (Rect, bool) {
 func (t *Tester) Clipboard() string { return t.h.clipboard }
 
 // SetClipboard sets the clipboard's text.
-func (t *Tester) SetClipboard(s string) { t.h.clipboard = s }
+func (t *Tester) SetClipboard(s string) { t.h.clipboard, t.h.clipboardData = s, transfer.Data{} }
+
+// ClipboardData returns what the view copied with Services.WriteClipboardData,
+// or the text it copied; SetClipboardData puts data on the clipboard, as
+// another app copies HTML.
+func (t *Tester) ClipboardData() transfer.Data { return t.h.readClipboardData(nil) }
+
+func (t *Tester) SetClipboardData(d transfer.Data) {
+	t.h.clipboardData = d.Snapshot()
+	b, _ := d.Read(transfer.Text)
+	t.h.clipboard = string(b)
+}
 
 // SetClipboardImage sets the clipboard's image, as PNG.
 func (t *Tester) SetClipboardImage(png []byte) { t.h.clipboardImage = png }

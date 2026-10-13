@@ -2,6 +2,8 @@ package ui
 
 import (
 	"slices"
+
+	transfer "github.com/egoist/mygo/transfer"
 )
 
 // TextInput creates a single-line text input editing *value.
@@ -249,6 +251,35 @@ func (e *node) Selectable() *node {
 		e.flags &^= flagUnselectable
 		e.flags |= flagSelectable
 	}
+	return e
+}
+
+// SelectedText is the part of a paragraph that the selection of a
+// Selectable container holds.
+type SelectedText struct {
+	// ID is the paragraph's element's (Element.ID).
+	ID uint64
+	// Text is the paragraph's text, and Start and End the runes of it the
+	// selection holds.
+	Text       string
+	Start, End int
+}
+
+// SelectedTexts returns the parts of the paragraphs that the selection of
+// a Selectable container holds, in the order they were built, or none,
+// as of the last frame: to copy them otherwise, as a context menu's item
+// does.
+func (e *node) SelectedTexts() []SelectedText {
+	return e.c.rt.selectedTexts(e.id)
+}
+
+// CopyData sets what Copy, its shortcut and the context menu's put on
+// the clipboard for the selection of a Selectable container: fn gets its
+// parts, as SelectedTexts returns them, and returns the data, as a
+// document copies its paragraphs with blank lines between them as text
+// (transfer.TextData), and as HTML too to keep their formatting.
+func (e *node) CopyData(fn func(parts []SelectedText) transfer.Data) *node {
+	e.copyData = fn
 	return e
 }
 

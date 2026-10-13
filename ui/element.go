@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/scene"
 	"github.com/egoist/mygo/internal/text"
+	transfer "github.com/egoist/mygo/transfer"
 )
 
 // Align positions children along an axis: Justify places them along the
@@ -286,6 +287,7 @@ type node struct {
 	textClient TextInputClient
 	caret      Rect
 	takesText  bool
+	copyData   func(parts []SelectedText) transfer.Data
 
 	// Content.
 	text     string

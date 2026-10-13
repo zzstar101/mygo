@@ -180,7 +180,10 @@ const (
 	SurfaceFocus
 	SurfaceBlur
 	// SurfaceCommand performs the edit command Text: "copy", "cut",
-	// "paste", "selectAll", "undo", "redo" or "delete" (Edit menu roles).
+	// "paste", "pasteAndMatchStyle", "selectAll", "undo", "redo" or
+	// "delete" (Edit menu roles), or a Format menu role's: "bold",
+	// "italic", "underline", "strikethrough", "alignLeft", "alignCenter"
+	// or "alignRight".
 	SurfaceCommand
 	// FileDragOver reports files of another app dragged over X, Y, and
 	// FileDragLeave that they left. FileDrop drops Files at X, Y.

@@ -50,6 +50,13 @@ type ListState struct {
 	// scrolling away from the end stops following it, and scrolling back
 	// to it follows again.
 	FollowEnd bool
+	// FollowAnimation, when set, makes a list following its end glide to
+	// it as rows are added or grow, as the animation says (Smooth, a
+	// spring, or a curve), rather than show it at once: what is added
+	// comes up from below, as the chat apps scroll. A glide on its way
+	// goes on from where it is as more comes, and the user scrolling stops
+	// it. It shows the end at once where the desktop asks for less motion.
+	FollowAnimation *Animation
 	// Selected, when set, lets a click choose a row, as Up, Down, Home and
 	// End do while the list has the keyboard focus, and Page Up and Page
 	// Down on Linux and Windows: *Selected is the chosen row, -1 for none,
@@ -115,7 +122,18 @@ type ListState struct {
 	anchorKey any
 	following bool
 	started   bool
-	laidOut   bool
+	// followLag is how far below its place the end shows as it glides
+	// there (FollowAnimation); followRow and followKey are the last row of
+	// the frame before, followBelow how much content was from its top to
+	// the end, and followWidth the width of rows then: more content below
+	// that row, as it grows or rows come after it, is the end moving down.
+	followLag   channel
+	followRow   int
+	followKey   any
+	followBelow float64
+	followWidth float32
+	followSeen  bool
+	laidOut     bool
 	// wroteY is the offset the list set, to tell it from scrolling.
 	wroteY  float64
 	req     listRequest
@@ -434,6 +452,8 @@ func (s *ListState) sync(e *node, n int) {
 			s.req = listRequest{set: true, offset: true, y: max(0, st.scrollY)}
 		}
 		st.list = s
+	case st.scrollY != s.wroteY && !s.req.set && s.following && s.followLag.value > 0.5 && st.scrollY > s.wroteY:
+		// Scrolled toward the end it glides to: it goes on following.
 	case st.scrollY != s.wroteY && !s.req.set:
 		// Scrolled by the wheel, the keys, the scroll bar or the app: a
 		// step moves the rows by as much, from the place; a jump goes
@@ -1201,6 +1221,7 @@ func (e *node) layoutList(w, h float32) {
 			shift(H - end())
 		}
 	}
+	glide := s.glideToEnd(e, n, lo, hi, H, func(d float64) { shift(d); cover() })
 	for k := 0; k < listOverscan && hi < n-1 && ensure(hi+1); k++ {
 		yHi += ht(hi) + gap
 		hi++
@@ -1284,7 +1305,59 @@ func (e *node) layoutList(w, h float32) {
 	e.scrollBase = scroll
 	st.scrollTo(st.scrollX, scroll)
 	s.inset = inset
-	s.remember(e, first, last, hi == n-1 && end() <= H+0.5, scroll)
+	s.remember(e, first, last, hi == n-1 && end()-glide <= H+0.5, scroll)
+}
+
+// glideToEnd moves the rows of a list following its end with a
+// FollowAnimation below their place, by as much as the end moved down
+// since the frame before, and on toward their place, as the animation
+// says; it returns how far below it they show. Rows lo to hi are placed,
+// and shift moves them. What moved is measured in the content, so that
+// the list growing or shrinking moves nothing.
+func (s *ListState) glideToEnd(e *node, n, lo, hi int, H float64, shift func(float64)) float64 {
+	rt, now := e.c.rt, e.c.now
+	if s.FollowAnimation == nil || !s.following || s.req.set || hi != n-1 || rt.preferences().ReduceMotion || rt.instant() {
+		s.followLag, s.followSeen = channel{}, false
+		return 0
+	}
+	hs, gap := &s.heights, s.gap
+	below := func(i int) float64 { return hs.top(n, gap) - hs.top(i, gap) }
+	ch := &s.followLag
+	if ch.at.IsZero() {
+		ch.at = now
+	}
+	ch.advance(now)
+	if s.followSeen && s.width == s.followWidth {
+		// The row last at the end: as much as came below it, the rows
+		// come up from below; as much as went, the glide takes back.
+		prev, ok := s.followRow, s.followRow < n
+		if s.Key != nil && s.followKey != nil {
+			prev, ok = s.find(s.followKey, s.followRow, n)
+		}
+		if !ok {
+			*ch = channel{at: now}
+		} else if d := below(prev) - s.followBelow; d > 0.5 {
+			ch.value = min(ch.value+d, H)
+			ch.retarget(0, *s.FollowAnimation)
+		} else if d < -0.5 {
+			// The rows stay where they show, above their place, and go
+			// down to it.
+			ch.value = max(ch.value+d, -H)
+			ch.retarget(0, *s.FollowAnimation)
+		}
+	}
+	s.followSeen, s.followRow, s.followBelow, s.followWidth, s.followKey = true, n-1, below(n-1), s.width, nil
+	if s.Key != nil {
+		s.followKey = s.Key(n - 1)
+	}
+	if ch.moving || ch.pending {
+		rt.animating = true
+	}
+	lag := ch.value
+	if lag > 0.01 || lag < -0.01 {
+		shift(lag)
+	}
+	return lag
 }
 
 // relayoutList lays the list out anew scrolled to y, as revealing its

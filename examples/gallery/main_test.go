@@ -46,13 +46,13 @@ func TestSidebarNavigation(t *testing.T) {
 	// Arrow navigation uses the selection that survived the click's rebuild.
 	click("Text")
 	tt.Key(0, ui.KeyDown)
-	check("/list")
+	check("/rich-text")
 	// History and other navigation synchronize the sidebar's selection.
 	g.router.Back()
 	tt.Frame()
 	check("/text")
 	tt.Key(0, ui.KeyDown)
-	check("/list")
+	check("/rich-text")
 	g.router.Push("/list/42")
 	tt.Frame()
 	tt.Key(0, ui.KeyDown)

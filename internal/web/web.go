@@ -41,8 +41,11 @@ type Backend struct {
 	mu      sync.Mutex
 	windows []*window
 	// clip is the text copied, which pastes read: browsers give the
-	// clipboard's text only to paste events (see surface.paste).
-	clip string
+	// clipboard's text only to paste events (see surface.paste). clipData
+	// is all that was copied or pasted, in its text formats, as HTML and
+	// a rich text's own format.
+	clip     string
+	clipData transfer.Data
 	// source is the appearance the app asked for: "light", "dark" or
 	// "system".
 	source string
@@ -291,6 +294,7 @@ func (c clipboard) ReadText() string {
 func (c clipboard) WriteText(text string) {
 	c.b.mu.Lock()
 	c.b.clip = text
+	c.b.clipData = transfer.TextData(text)
 	c.b.mu.Unlock()
 	if cb := js.Global().Get("navigator").Get("clipboard"); !cb.IsUndefined() {
 		p := cb.Call("writeText", text)
@@ -299,20 +303,40 @@ func (c clipboard) WriteText(text string) {
 }
 
 func (c clipboard) ReadData(formats []transfer.Format) (transfer.Data, error) {
+	c.b.mu.Lock()
+	d := c.b.clipData
+	c.b.mu.Unlock()
+	var reps []transfer.Representation
 	for _, f := range formats {
-		if f == transfer.Text {
-			return transfer.TextData(c.ReadText()), nil
+		if b, err := d.Read(f); err == nil {
+			reps = append(reps, transfer.Bytes(f, b))
 		}
 	}
-	return transfer.Data{}, nil
+	if formats == nil {
+		return d, nil
+	}
+	if len(reps) == 0 {
+		return transfer.Data{}, nil
+	}
+	return transfer.New(transfer.NewItem(reps...)), nil
 }
 
+// WriteData keeps data's text formats, which the copy event under way
+// gives the browser (surface.copy), and writes its plain text to the
+// system's clipboard, which browsers allow while the user acts.
 func (c clipboard) WriteData(d transfer.Data, released func()) error {
 	t, err := d.Read(transfer.Text)
 	if err != nil {
 		return errUnsupported
 	}
+	d, err = d.Materialize(d.Formats())
+	if err != nil {
+		return err
+	}
 	c.WriteText(string(t))
+	c.b.mu.Lock()
+	c.b.clipData = d
+	c.b.mu.Unlock()
 	if released != nil {
 		released()
 	}
@@ -320,10 +344,12 @@ func (c clipboard) WriteData(d transfer.Data, released func()) error {
 }
 
 func (c clipboard) Formats() []transfer.Format {
-	if c.ReadText() == "" {
+	c.b.mu.Lock()
+	defer c.b.mu.Unlock()
+	if c.b.clip == "" && len(c.b.clipData.Items()) == 0 {
 		return nil
 	}
-	return []transfer.Format{transfer.Text}
+	return c.b.clipData.Formats()
 }
 
 func (clipboard) Flush() error                 { return nil }
@@ -341,10 +367,14 @@ func (shell) OpenExternal(url string) error {
 	js.Global().Call("open", url, "_blank", "noopener")
 	return nil
 }
-func (shell) OpenPath(string) error   { return errUnsupported }
-func (shell) ShowItemInFolder(string) {}
-func (shell) TrashItem(string) error  { return errUnsupported }
-func (shell) Beep()                   {}
+func (shell) OpenPath(string) error                { return errUnsupported }
+func (shell) ShowItemInFolder(string)              {}
+func (shell) TrashItem(string) error               { return errUnsupported }
+func (shell) Beep()                                {}
+func (shell) FileIcon(string, int) ([]byte, error) { return nil, errUnsupported }
+func (shell) OpenApplication(string) error         { return errUnsupported }
+
+func (*Backend) Applications() ([]platform.Application, error) { return nil, errUnsupported }
 
 type screen struct{}
 

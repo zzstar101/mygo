@@ -329,6 +329,23 @@ func (e *canvasEngine) shape(text []rune, style Style, spans []Span, width float
 		}
 	}
 
+	// Inline objects take their width, whatever the canvas measured of
+	// their character.
+	{
+		start := 0
+		for _, sp := range spans {
+			end := min(sp.End, len(text))
+			if sp.ObjectWidth > 0 {
+				for k := range clusters {
+					if c := &clusters[k]; c.start >= start && c.start < end {
+						c.advance = sp.ObjectWidth
+					}
+				}
+			}
+			start = max(start, end)
+		}
+	}
+
 	// Lines: whole pieces between breaks that fit, or clusters of those
 	// longer than a line unless wholeWords.
 	var lines [][2]int // clusters [i, j)

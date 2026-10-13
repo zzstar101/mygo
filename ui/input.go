@@ -804,7 +804,12 @@ func (rt *engine) editEvent(ev editEvent) {
 	}
 	if h := rt.focusHandler(); h != nil && h.editor == nil {
 		kind := map[editKind]InputKind{editInsert: InputText, editCompose: InputCompose, editCommand: InputCommand}[ev.kind]
-		if kind != 0 && rt.deliver(h, InputEvent{Kind: kind, Text: ev.text, Caret: ev.caret}) {
+		handled := kind != 0 && rt.deliver(h, InputEvent{Kind: kind, Text: ev.text, Caret: ev.caret})
+		if !handled && kind == InputCommand && ev.text == "pasteAndMatchStyle" {
+			// A handler of text without styles pastes it as Paste does.
+			handled = rt.deliver(h, InputEvent{Kind: kind, Text: "paste"})
+		}
+		if handled {
 			rt.blinkStart = time.Now()
 		}
 		return

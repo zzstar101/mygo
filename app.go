@@ -212,12 +212,14 @@ func (a *Application) prepareQuit() bool {
 	// closed. Persist them before the native loop ends; callers needing
 	// error handling may Flush explicitly from a quit listener.
 	_ = Clipboard.Flush()
+	stopCookieCalls()
 	return true
 }
 
 // finish runs once after the event loop has stopped.
 func (a *Application) finish() {
 	a.finished.Do(func() {
+		stopCookieCalls()
 		stopFileWatches()
 		clipboardStopped = true
 		backend().Clipboard().Close()

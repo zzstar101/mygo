@@ -224,7 +224,11 @@ while it has the focus, composing at the caret it gives. `c.ReadClipboard`,
 `c.WriteClipboard` and `c.OpenURL` copy, paste and open links for them;
 `c.OpenURLThen` opens a link too, and its function gets what came of it a
 moment later, as the system opens it, with an error when no app could,
-and the view builds a frame anew:
+and the view builds a frame anew. `Services.ReadClipboardData` and
+`WriteClipboardData` read and write several formats at once, as a rich
+text editor copies its own, HTML and plain text. A text field of the app's
+own gets `InputSelect` when a screen reader moves its selection: the runes
+`Start` to `End` of the text its `Access` describes.
 
 ```go
 ui.Box(c).Fill().Focusable().HandleInput(func(ev ui.InputEvent) bool {

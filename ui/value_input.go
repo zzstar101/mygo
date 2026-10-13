@@ -279,3 +279,13 @@ type inputAction struct {
 func (n *node) afterInput(fn func()) {
 	n.c.rt.afterInputs = append(n.c.rt.afterInputs, inputAction{node: n, fn: fn})
 }
+
+// SetChanged reports the element's value as changed in this build pass,
+// as a widget of your own whose input changed what it edits: Changed
+// returns true for it, as for the widgets' own.
+func (e *node) SetChanged() *node {
+	if e.hasState() {
+		e.st.markChanged()
+	}
+	return e
+}

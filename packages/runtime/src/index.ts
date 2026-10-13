@@ -162,6 +162,47 @@ export function onFileDrop(listener: (drop: FileDrop) => void): () => void {
   return on<FileDrop>("mygo:file-drop", listener);
 }
 
+/** The document a window shows (mygo.NewDocuments), as Go describes it. */
+export interface DocumentState {
+  /** The file name, or a name such as "Untitled 2" while untitled. */
+  name: string;
+  /** The file, "" while the document is untitled. */
+  path: string;
+  /** Whether the document has unsaved changes. */
+  edited: boolean;
+  /** Whether its file can't be written: saving asks for another. */
+  readOnly: boolean;
+  /** Whether another app changed its file while it had unsaved changes. */
+  conflict: boolean;
+  /** Whether its file was deleted: saving writes it again. */
+  deleted: boolean;
+}
+
+/**
+ * Subscribes to the state of the window's document: edited, saved,
+ * renamed, moved, changed by another app. Only the app's own pages get it.
+ * Returns a function that unsubscribes.
+ *
+ * ```ts
+ * onDocumentState(({ name, edited }) => {
+ *   heading.textContent = edited ? `${name} (edited)` : name;
+ * });
+ * ```
+ */
+export function onDocumentState(listener: (state: DocumentState) => void): () => void {
+  return on<DocumentState>("mygo:document-state", listener);
+}
+
+/**
+ * Subscribes to the window's document being read from its file again:
+ * reverted, or changed by another app while it had no unsaved changes.
+ * Fetch its content again, with the service bound to
+ * `Documents.Service()`. Returns a function that unsubscribes.
+ */
+export function onDocumentReload(listener: () => void): () => void {
+  return on<unknown>("mygo:document-reload", () => listener());
+}
+
 /** The accent color and the accessibility settings of the desktop. */
 export interface ThemePreferences {
   /** The accent color as "#rrggbb", or "" where the desktop has none. */

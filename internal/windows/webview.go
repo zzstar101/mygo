@@ -102,6 +102,7 @@ func (w *window) withWebViewOr(fn func(), fail func(error)) {
 
 // failPending fails the calls waiting for the webview.
 func (w *window) failPending(err error) {
+	failCookieRequests(w, err)
 	pending := w.pending
 	w.pending = nil
 	for _, c := range pending {

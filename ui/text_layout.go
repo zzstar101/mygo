@@ -93,8 +93,38 @@ func ShapeRichText(spans []Span, font Font, width float32) *TextLayout {
 	return shapeText(b.String(), font, width, slices.Clone(spans))
 }
 
+// TextShape is how ShapeRichTextWith lays text out.
+type TextShape struct {
+	// Width wraps lines at it, in DIPs; zero only breaks at newlines.
+	Width float32
+	// Align aligns the lines within Width: Start (the default, the right
+	// in right-to-left paragraphs), Center or End.
+	Align Align
+}
+
+// ShapeRichTextWith shapes spans as ShapeRichText does, laid out as shape
+// says: a rich text editor aligns its paragraphs.
+func ShapeRichTextWith(spans []Span, font Font, shape TextShape) *TextLayout {
+	var b strings.Builder
+	for _, sp := range spans {
+		b.WriteString(sp.Text)
+	}
+	return shapeTextAligned(b.String(), font, shape, slices.Clone(spans))
+}
+
 func shapeText(s string, font Font, width float32, spans []Span) *TextLayout {
-	l := text.Shared().Shape(text.Params{Text: s, Style: font.style(), Width: width, KeepSpaces: true, Spans: encodeSpans(spans)})
+	return shapeTextAligned(s, font, TextShape{Width: width}, spans)
+}
+
+func shapeTextAligned(s string, font Font, shape TextShape, spans []Span) *TextLayout {
+	params := text.Params{Text: s, Style: font.style(), Width: shape.Width, KeepSpaces: true, Spans: encodeSpans(spans)}
+	switch shape.Align {
+	case Center:
+		params.Align = text.Center
+	case End:
+		params.Align = text.End
+	}
+	l := text.Shared().Shape(params)
 	t := &TextLayout{l: l, units: make([]int, len(l.Runes)+1), spans: spans}
 	for i, r := range l.Runes {
 		t.units[i+1] = t.units[i] + utf16.RuneLen(r)
@@ -104,6 +134,44 @@ func shapeText(s string, font Font, width float32, spans []Span) *TextLayout {
 	// Boundary iteration is per shaped paragraph, never per document edit.
 	t.boundaries = boundaries.GraphemeOffsets()
 	return t
+}
+
+// TextObject is an inline object of a TextLayout (Span.ObjectWidth): the
+// UTF-16 offset of its object replacement character, and its box,
+// standing on its line's baseline.
+type TextObject struct {
+	Index int
+	Rect  Rect
+}
+
+// Objects returns the inline objects of the layout, in the order of the
+// text, where a rich text editor draws its attachments.
+func (t *TextLayout) Objects() []TextObject {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []TextObject
+	var spans []text.Span
+	for _, line := range t.l.Lines {
+		for _, g := range line.Glyphs {
+			if !g.Object {
+				continue
+			}
+			if spans == nil {
+				spans = text.DecodeSpans(t.l.Params.Spans)
+			}
+			h := float32(0)
+			end := 0
+			for _, sp := range spans {
+				end = sp.End
+				if g.Cluster < end {
+					h = sp.ObjectHeight
+					break
+				}
+			}
+			out = append(out, TextObject{Index: t.units[g.Cluster], Rect: Rect{X: g.X, Y: line.Baseline - h, W: g.Advance, H: h}})
+		}
+	}
+	return out
 }
 
 // Size is the layout's extent in DIPs.

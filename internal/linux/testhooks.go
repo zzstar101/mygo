@@ -390,3 +390,6 @@ func TestRightClickSurface(handle uintptr, x, y float64) bool {
 func TestHasRecentItem(path string) bool {
 	return gtkRecentManagerHasItem(gtkRecentManagerGetDefault(), cs(fileURI(path)))
 }
+
+// TestWindowTitle returns the title GTK gives a window.
+func TestWindowTitle(handle uintptr) string { return goStr(gtkWindowGetTitle(handle)) }

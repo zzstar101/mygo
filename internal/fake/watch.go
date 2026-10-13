@@ -1,6 +1,7 @@
 package fake
 
 import (
+	"os"
 	"sync"
 
 	"github.com/egoist/mygo/internal/platform"
@@ -86,4 +87,15 @@ func (w *FileWatch) Notify(n platform.FileWatchNotice) {
 	if !closed {
 		w.notify(n)
 	}
+}
+
+// ReplaceFile renames replacement over target, with the target's
+// permissions.
+func (b *Backend) ReplaceFile(target, replacement string) error {
+	if info, err := os.Stat(target); err == nil {
+		if err := os.Chmod(replacement, info.Mode().Perm()); err != nil {
+			return err
+		}
+	}
+	return os.Rename(replacement, target)
 }

@@ -283,6 +283,7 @@ func loadCoreText() error {
 	ct.featureSettings = optional(text, "kCTFontFeatureSettingsAttribute")
 	ct.featureTag = optional(text, "kCTFontOpenTypeFeatureTag")
 	ct.featureValue = optional(text, "kCTFontOpenTypeFeatureValue")
+	initDelegates(text, optional)
 	// Optional: adding fonts from memory (macOS 10.13), sRGB by name.
 	if sym, err := purego.Dlsym(text, "CTFontManagerCreateFontDescriptorsFromData"); err == nil && sym != 0 {
 		purego.RegisterFunc(&ct.descriptorsFromData, sym)
@@ -694,13 +695,37 @@ func (e *coreText) styleSpans(attributed uintptr, style Style, spans []Span, tex
 			at[i+1]++
 		}
 	}
+	objects := 0
+	for i, sp := range spans {
+		if sp.ObjectWidth > 0 {
+			start := 0
+			if i > 0 {
+				start = spans[i-1].End
+			}
+			objects += max(min(sp.End, len(text))-start, 0)
+		}
+	}
+	runDelegates.reset(objects)
+	objects = 0
 	from := 0
 	for _, sp := range spans {
 		to := max(from, min(sp.End, len(text)))
 		r := cfRange{at[from], at[to] - at[from]}
+		start := from
 		from = to
 		if r.length == 0 {
 			continue
+		}
+		if sp.ObjectWidth > 0 {
+			// Each rune is an object of its own: a run Core Text sizes by
+			// its delegate.
+			for k := start; k < to; k++ {
+				if d := runDelegates.delegate(objects, sp.ObjectWidth, sp.ObjectHeight); d != 0 {
+					ct.attributedSet(styled, cfRange{at[k], at[k+1] - at[k]}, runDelegates.attribute, d)
+					ct.release(d)
+				}
+				objects++
+			}
 		}
 		s := sp.style(style)
 		if font := e.ctFont(s); font != 0 {

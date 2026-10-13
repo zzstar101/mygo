@@ -96,6 +96,12 @@ type Span struct {
 	Italic        bool
 	LetterSpacing float32
 	Features      string
+	// ObjectWidth and ObjectHeight, when ObjectWidth is set, make each
+	// rune of the span, an object replacement character (U+FFFC), an
+	// inline object: a box that wide, standing that high on the baseline,
+	// which lines break around and which draws no glyph, as an image in a
+	// rich text's line (Glyph.Object).
+	ObjectWidth, ObjectHeight float32
 }
 
 // style returns the style of the span's runes in a text of style base.
@@ -142,12 +148,14 @@ func EncodeSpans(spans []Span) string {
 		}
 		b = binary.LittleEndian.AppendUint32(b, math.Float32bits(sp.LetterSpacing))
 		str(sp.Features)
+		b = binary.LittleEndian.AppendUint32(b, math.Float32bits(sp.ObjectWidth))
+		b = binary.LittleEndian.AppendUint32(b, math.Float32bits(sp.ObjectHeight))
 	}
 	return string(b)
 }
 
-// decodeSpans reads what EncodeSpans wrote.
-func decodeSpans(s string) []Span {
+// DecodeSpans reads what EncodeSpans wrote.
+func DecodeSpans(s string) []Span {
 	b := []byte(s)
 	var out []Span
 	uvarint := func() int {
@@ -190,6 +198,8 @@ func decodeSpans(s string) []Span {
 		}
 		sp.LetterSpacing = f32()
 		sp.Features = str()
+		sp.ObjectWidth = f32()
+		sp.ObjectHeight = f32()
 		if b == nil {
 			break
 		}
@@ -265,6 +275,9 @@ type Glyph struct {
 	// runes the cluster holds; glyphs of the ellipsis have Runes 0.
 	Cluster, Runes int
 	RTL            bool
+	// Object marks the box of an inline object (Span.ObjectWidth), which
+	// draws no glyph: what shows there is the caller's.
+	Object bool
 }
 
 // System lays out text and rasterizes glyphs with the system's own text
@@ -715,7 +728,7 @@ func (s *System) layout(p Params) *cached {
 	s.engine().resetScratch()
 	m := metricsOf(s.font(p.Style), p.Style)
 	runes := []rune(p.Text)
-	spans := decodeSpans(p.Spans)
+	spans := DecodeSpans(p.Spans)
 	c := &cached{layout: Layout{Params: p, Runes: runes}}
 	l := &c.layout
 	l.Lines = c.line[:0]
@@ -815,7 +828,7 @@ func (s *System) paragraph(out []Line, p Params, spans []Span, runes []rune, sta
 	first := len(out)
 	for _, sl := range shaped {
 		k := glyphCount(sl)
-		out = append(out, line(p, text, sl, start, rtl, m, y, room[:0:k], &s.starts))
+		out = append(out, line(p, text, sl, start, rtl, m, y, room[:0:k], &s.starts, spans))
 		room = room[k:]
 	}
 	lines := out[first:]
@@ -842,7 +855,7 @@ func glyphCount(sl shapedLine) int {
 // line positions a line of the paragraph text, which starts at rune
 // offset of the layout, with its top at *y, and moves *y past it. Its
 // glyphs go to room, which has room for those of sl; buf is a buffer.
-func line(p Params, text []rune, sl shapedLine, offset int, rtl bool, m lineMetrics, y *float32, room []Glyph, buf *[]int) Line {
+func line(p Params, text []rune, sl shapedLine, offset int, rtl bool, m lineMetrics, y *float32, room []Glyph, buf *[]int, spans []Span) Line {
 	line := Line{Start: offset + sl.start, End: offset + sl.end, RTL: rtl, Ascent: m.ascent, Descent: m.descent}
 	if cap(room) > 0 {
 		line.Glyphs = room
@@ -887,6 +900,12 @@ func line(p Params, text []rune, sl shapedLine, offset int, rtl bool, m lineMetr
 					next = starts[i+1]
 				}
 				g.Runes = max(next-g.Cluster, 1)
+				if o := objectAt(spans, g.Cluster); o != nil {
+					// An inline object stands on the baseline, as high as
+					// it is, whatever font its run took.
+					g.Object, g.Advance, g.ID = true, o.ObjectWidth, 0
+					line.Ascent = max(line.Ascent, o.ObjectHeight)
+				}
 				g.Cluster += offset
 			}
 			g.Size = runSize
@@ -912,6 +931,21 @@ func line(p Params, text []rune, sl shapedLine, offset int, rtl bool, m lineMetr
 	*y += line.Height
 	*buf = starts
 	return line
+}
+
+// objectAt returns the span of rune i if it makes it an inline object,
+// else nil.
+func objectAt(spans []Span, i int) *Span {
+	k, _ := slices.BinarySearchFunc(spans, i, func(sp Span, i int) int {
+		if sp.End <= i {
+			return -1
+		}
+		return 1
+	})
+	if k < len(spans) && spans[k].ObjectWidth > 0 {
+		return &spans[k]
+	}
+	return nil
 }
 
 // ellipsis ends text cut short, unless Params.Ellipsis gives another.

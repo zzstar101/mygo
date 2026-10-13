@@ -318,6 +318,10 @@ func (r *Router) changed() {
 
 // isPath reports whether a link's target is a path within the app, as
 // "/notes/42", "edit" or "?tab=info", rather than a URL with a scheme.
+// Router returns the router whose page is being built, which a Link to a
+// path without a scheme goes through, or nil outside one.
+func (c *context) Router() *Router { return c.router }
+
 func isPath(target string) bool {
 	u, err := url.Parse(target)
 	return err == nil && u.Scheme == "" && u.Host == "" && u.Opaque == ""

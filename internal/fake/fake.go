@@ -7,6 +7,9 @@ import (
 	"bytes"
 	"cmp"
 	"errors"
+	"image"
+	"image/png"
+	"os"
 	"runtime"
 	"strconv"
 	"sync"
@@ -67,6 +70,8 @@ type Backend struct {
 	DockMenu *platform.Menu
 	// Cleared counts ClearBrowsingData calls.
 	Cleared int
+	// cookies holds the cookies of the pages, by name, domain and path.
+	cookies map[platform.CookieKey]platform.Cookie
 	// RecentDocuments are the paths AddRecentDocument recorded, in order,
 	// without the ones ClearRecentDocuments removed.
 	RecentDocuments []string
@@ -78,6 +83,11 @@ type Backend struct {
 	OpenResult    []string
 	SaveResult    string
 	MessageResult platform.MessageBoxResult
+	// OnOpenDialog, OnSaveDialog and OnMessageBox, when set, answer the
+	// dialogs instead of the results above. They run on the main thread.
+	OnOpenDialog func(opts *platform.OpenDialogOptions) []string
+	OnSaveDialog func(opts *platform.SaveDialogOptions) string
+	OnMessageBox func(opts *platform.MessageBoxOptions) platform.MessageBoxResult
 	// NotificationError, when set, is what showing a notification fails
 	// with.
 	NotificationError error
@@ -268,6 +278,13 @@ func (b *Backend) Power() platform.Power     { return power{b} }
 func (b *Backend) Network() platform.Network { return network{b} }
 func (b *Backend) Secrets() platform.Secrets { return secrets{b} }
 
+// Apps are the applications Applications lists, which tests set.
+var Apps []platform.Application
+
+func (b *Backend) Applications() ([]platform.Application, error) {
+	return append([]platform.Application(nil), Apps...), nil
+}
+
 func (b *Backend) NewTray(platform.TrayHandler) (platform.Tray, error) { return &tray{}, nil }
 
 func (b *Backend) RegisterHotkey(id int, acc string) error {
@@ -395,6 +412,10 @@ type Window struct {
 	OnAllWorkspaces bool
 	AutoHidesMenu   bool
 	Icon            []byte
+	// RepresentedFile and DocumentEdited are what SetRepresentedFile and
+	// SetDocumentEdited set.
+	RepresentedFile string
+	DocumentEdited  bool
 	// TitleBarRoom is what TitleBar returns: set for windows with a hidden
 	// title bar, and changed by tests before they call H.TitleBarChanged.
 	TitleBarRoom platform.TitleBar
@@ -438,6 +459,15 @@ func (w *Window) FlashFrame(v bool)                { w.mu.Lock(); w.Flashing = v
 func (w *Window) SetSkipTaskbar(v bool)            { w.mu.Lock(); w.SkipsTaskbar = v; w.mu.Unlock() }
 func (w *Window) SetVisibleOnAllWorkspaces(v bool) { w.mu.Lock(); w.OnAllWorkspaces = v; w.mu.Unlock() }
 func (w *Window) SetAutoHideMenu(v bool)           { w.mu.Lock(); w.AutoHidesMenu = v; w.mu.Unlock() }
+func (w *Window) SetRepresentedFile(p string)      { w.mu.Lock(); w.RepresentedFile = p; w.mu.Unlock() }
+func (w *Window) SetDocumentEdited(v bool)         { w.mu.Lock(); w.DocumentEdited = v; w.mu.Unlock() }
+
+// Document returns what SetRepresentedFile and SetDocumentEdited set.
+func (w *Window) Document() (path string, edited bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.RepresentedFile, w.DocumentEdited
+}
 func (w *Window) SetIcon(png []byte) error {
 	if png != nil && !bytes.HasPrefix(png, []byte("\x89PNG")) {
 		return errors.New("fake: not a PNG image")
@@ -679,6 +709,7 @@ func (a app) SetDockMenu(m *platform.Menu) { a.b.mu.Lock(); a.b.DockMenu = m; a.
 func (a app) ClearBrowsingData(done func(error)) {
 	a.b.mu.Lock()
 	a.b.Cleared++
+	clear(a.b.cookies)
 	a.b.mu.Unlock()
 	done(nil)
 }
@@ -713,13 +744,25 @@ func (a app) SetJumpListTasks(tasks []platform.JumpListTask) error {
 
 type dialogs struct{ b *Backend }
 
-func (d dialogs) ShowOpenDialog(_ platform.Window, _ *platform.OpenDialogOptions, cb func([]string, error)) {
+func (d dialogs) ShowOpenDialog(_ platform.Window, o *platform.OpenDialogOptions, cb func([]string, error)) {
+	if f := d.b.OnOpenDialog; f != nil {
+		cb(f(o), nil)
+		return
+	}
 	cb(d.b.OpenResult, nil)
 }
-func (d dialogs) ShowSaveDialog(_ platform.Window, _ *platform.SaveDialogOptions, cb func(string, error)) {
+func (d dialogs) ShowSaveDialog(_ platform.Window, o *platform.SaveDialogOptions, cb func(string, error)) {
+	if f := d.b.OnSaveDialog; f != nil {
+		cb(f(o), nil)
+		return
+	}
 	cb(d.b.SaveResult, nil)
 }
-func (d dialogs) ShowMessageBox(_ platform.Window, _ *platform.MessageBoxOptions, cb func(platform.MessageBoxResult, error)) {
+func (d dialogs) ShowMessageBox(_ platform.Window, o *platform.MessageBoxOptions, cb func(platform.MessageBoxResult, error)) {
+	if f := d.b.OnMessageBox; f != nil {
+		cb(f(o), nil)
+		return
+	}
 	cb(d.b.MessageResult, nil)
 }
 
@@ -802,6 +845,25 @@ func (shell) OpenPath(string) error     { return nil }
 func (shell) ShowItemInFolder(string)   {}
 func (shell) TrashItem(string) error    { return nil }
 func (shell) Beep()                     {}
+
+// Opened are the paths OpenApplication was given.
+var Opened []string
+
+func (shell) OpenApplication(path string) error {
+	Opened = append(Opened, path)
+	return nil
+}
+
+// FileIcon returns a transparent PNG of the size asked for, or the error of
+// a path that does not exist.
+func (shell) FileIcon(path string, size int) ([]byte, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	err := png.Encode(&buf, image.NewNRGBA(image.Rect(0, 0, size, size)))
+	return buf.Bytes(), err
+}
 
 type power struct{ b *Backend }
 

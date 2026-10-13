@@ -536,6 +536,18 @@ func (rt *engine) accessAction(ev platform.SurfaceEvent) {
 		if ev.Action == platform.AccessCollapse {
 			s.expand = -1
 		}
+	case platform.AccessSelectText:
+		if ed := s.editor; ed != nil && s.flags&flagEditable != 0 {
+			n := ed.buf.n
+			ed.editorSelection = editorSelection{anchor: max(0, min(ev.From, n)), caret: max(0, min(ev.To, n))}
+			if ed.area != nil {
+				ed.area.reveal = true
+			}
+			break
+		}
+		if s.input != nil {
+			s.input(InputEvent{Kind: InputSelect, Start: ev.From, End: ev.To})
+		}
 	case platform.AccessSetValue:
 		if s.editor == nil || s.flags&flagEditable == 0 || s.editor.readOnly {
 			return

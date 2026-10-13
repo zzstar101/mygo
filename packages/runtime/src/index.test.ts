@@ -8,10 +8,13 @@ import {
   isMyGo,
   locale,
   on,
+  onDocumentReload,
+  onDocumentState,
   onFileDrop,
   onLocaleChange,
   onPreferences,
   runtime,
+  type DocumentState,
   type FileDrop,
   type Runtime,
   type ThemePreferences,
@@ -110,6 +113,23 @@ test("onFileDrop", () => {
   expect(got).toEqual([{ paths: ["/tmp/a.txt"], x: 10, y: 20 }]);
   off();
   expect(listeners.has("mygo:file-drop")).toBe(false);
+});
+
+test("onDocumentState and onDocumentReload", () => {
+  (globalThis as { mygo?: Runtime }).mygo = fake;
+  const states: DocumentState[] = [];
+  let reloads = 0;
+  const off = onDocumentState((s) => states.push(s));
+  const offReload = onDocumentReload(() => reloads++);
+  const state = { name: "a.md", path: "/tmp/a.md", edited: true, readOnly: false, conflict: false, deleted: false };
+  listeners.get("mygo:document-state")?.(state);
+  listeners.get("mygo:document-reload")?.({});
+  expect(states).toEqual([state]);
+  expect(reloads).toBe(1);
+  off();
+  offReload();
+  expect(listeners.has("mygo:document-state")).toBe(false);
+  expect(listeners.has("mygo:document-reload")).toBe(false);
 });
 
 test("onPreferences", () => {

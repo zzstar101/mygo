@@ -151,6 +151,9 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   name in Finder.
 - [Find bar](find-bar.md): a bar for finding text, with the count of
   matches and the next and previous ones.
+- [Rich text editor](rich-text-editor.md): attributed text with formats,
+  links, headings, lists, tasks and images, the shortcuts and Format menu
+  of word processors, rich copy and paste, and Markdown.
 
 ## Code
 
@@ -159,6 +162,12 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   files of any size.
 - [Diff viewer](diff-viewer.md): the changes between two texts, side by
   side or unified, with the new text editable and changes to review.
+
+## Documents
+
+- [Markdown](markdown.md): CommonMark and GitHub's Markdown, as finished
+  documents or a language model's replies streaming in, selectable and
+  copied as text or Markdown.
 
 ## Dates and colors
 

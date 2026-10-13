@@ -44,22 +44,43 @@ const (
 	RoleMinimize           MenuRole = "minimize"
 	RoleZoom               MenuRole = "zoom"
 	RoleClose              MenuRole = "close"
-	RoleQuit               MenuRole = "quit"
-	RoleAbout              MenuRole = "about"         // (macOS)
-	RoleHide               MenuRole = "hide"          // (macOS)
-	RoleHideOthers         MenuRole = "hideOthers"    // (macOS)
-	RoleUnhide             MenuRole = "unhide"        // (macOS)
-	RoleFront              MenuRole = "front"         // (macOS)
-	RoleServices           MenuRole = "services"      // (macOS) submenu
-	RoleStartSpeaking      MenuRole = "startSpeaking" // (macOS)
-	RoleStopSpeaking       MenuRole = "stopSpeaking"  // (macOS)
-	RoleWindow             MenuRole = "window"        // submenu listing open windows (macOS)
-	RoleHelp               MenuRole = "help"          // submenu with the search field (macOS)
-	RoleAppMenu            MenuRole = "appMenu"       // default application menu
-	RoleFileMenu           MenuRole = "fileMenu"      // default File menu
-	RoleEditMenu           MenuRole = "editMenu"      // default Edit menu
-	RoleViewMenu           MenuRole = "viewMenu"      // default View menu
-	RoleWindowMenu         MenuRole = "windowMenu"    // default Window menu
+	// Documents (NewDocuments): they act on the focused window's
+	// document, and New and Open on the app's first kind of documents.
+	RoleNew           MenuRole = "new"
+	RoleOpen          MenuRole = "open"
+	RoleOpenRecent    MenuRole = "openRecent" // submenu of the recent documents
+	RoleSave          MenuRole = "save"
+	RoleSaveAs        MenuRole = "saveAs"
+	RoleDuplicate     MenuRole = "duplicate"
+	RoleRename        MenuRole = "rename"
+	RoleMoveTo        MenuRole = "moveTo"
+	RoleRevert        MenuRole = "revert"
+	RoleQuit          MenuRole = "quit"
+	RoleAbout         MenuRole = "about"         // (macOS)
+	RoleHide          MenuRole = "hide"          // (macOS)
+	RoleHideOthers    MenuRole = "hideOthers"    // (macOS)
+	RoleUnhide        MenuRole = "unhide"        // (macOS)
+	RoleFront         MenuRole = "front"         // (macOS)
+	RoleServices      MenuRole = "services"      // (macOS) submenu
+	RoleStartSpeaking MenuRole = "startSpeaking" // (macOS)
+	RoleStopSpeaking  MenuRole = "stopSpeaking"  // (macOS)
+	RoleWindow        MenuRole = "window"        // submenu listing open windows (macOS)
+	RoleHelp          MenuRole = "help"          // submenu with the search field (macOS)
+	RoleAppMenu       MenuRole = "appMenu"       // default application menu
+	RoleFileMenu      MenuRole = "fileMenu"      // default File menu
+	RoleEditMenu      MenuRole = "editMenu"      // default Edit menu
+	RoleViewMenu      MenuRole = "viewMenu"      // default View menu
+	RoleWindowMenu    MenuRole = "windowMenu"    // default Window menu
+	// The Format menu's roles format the selection of a rich text editor
+	// of native UI (ui/richtext), or of an editable web page.
+	RoleBold          MenuRole = "bold"
+	RoleItalic        MenuRole = "italic"
+	RoleUnderline     MenuRole = "underline"
+	RoleStrikethrough MenuRole = "strikethrough"
+	RoleAlignLeft     MenuRole = "alignLeft"
+	RoleAlignCenter   MenuRole = "alignCenter"
+	RoleAlignRight    MenuRole = "alignRight"
+	RoleFormatMenu    MenuRole = "formatMenu" // default Format menu
 )
 
 // MenuItem is an entry of a Menu. Fill in the exported fields to build a
@@ -457,6 +478,9 @@ func performRole(role MenuRole, win *Window) {
 		return
 	case "":
 		return
+	case RoleNew, RoleOpen, RoleSave, RoleSaveAs, RoleDuplicate, RoleRename, RoleMoveTo, RoleRevert:
+		documentRole(role, win)
+		return
 	}
 	if win == nil || win.native == nil {
 		return
@@ -509,12 +533,25 @@ func performRole(role MenuRole, win *Window) {
 	case RoleUndo, RoleRedo, RoleCut, RoleCopy, RolePaste, RoleDelete, RoleSelectAll, RolePasteAndMatchStyle:
 		cmd := map[MenuRole]string{
 			RoleUndo: "undo", RoleRedo: "redo", RoleCut: "cut", RoleCopy: "copy", RolePaste: "paste",
-			RoleDelete: "delete", RoleSelectAll: "selectAll", RolePasteAndMatchStyle: "paste",
+			RoleDelete: "delete", RoleSelectAll: "selectAll", RolePasteAndMatchStyle: "pasteAndMatchStyle",
 		}[role]
 		if win.content != nil {
 			win.contentCommand(cmd)
 			return
 		}
+		if role == RolePasteAndMatchStyle {
+			cmd = "paste"
+		}
+		n.Eval("document.execCommand(" + `"` + cmd + `"` + ")")
+	case RoleBold, RoleItalic, RoleUnderline, RoleStrikethrough, RoleAlignLeft, RoleAlignCenter, RoleAlignRight:
+		if win.content != nil {
+			win.contentCommand(string(role))
+			return
+		}
+		cmd := map[MenuRole]string{
+			RoleBold: "bold", RoleItalic: "italic", RoleUnderline: "underline", RoleStrikethrough: "strikeThrough",
+			RoleAlignLeft: "justifyLeft", RoleAlignCenter: "justifyCenter", RoleAlignRight: "justifyRight",
+		}[role]
 		n.Eval("document.execCommand(" + `"` + cmd + `"` + ")")
 	}
 }
@@ -573,7 +610,37 @@ func roleDefaults(r MenuRole) (label, accel string) {
 	case RoleZoom:
 		return "Zoom", ""
 	case RoleClose:
+		if hasDocuments() {
+			return "Close", "CmdOrCtrl+W"
+		}
 		return "Close Window", "CmdOrCtrl+W"
+	case RoleNew:
+		return "New", "CmdOrCtrl+N"
+	case RoleOpen:
+		return "Open…", "CmdOrCtrl+O"
+	case RoleOpenRecent:
+		return "Open Recent", ""
+	case RoleSave:
+		return "Save", "CmdOrCtrl+S"
+	case RoleSaveAs:
+		if mac {
+			return "Save As…", "Alt+Shift+Cmd+S"
+		}
+		return "Save As…", "Ctrl+Shift+S"
+	case RoleDuplicate:
+		if mac {
+			return "Duplicate", "Shift+Cmd+S"
+		}
+		return "Duplicate", ""
+	case RoleRename:
+		return "Rename…", ""
+	case RoleMoveTo:
+		return "Move To…", ""
+	case RoleRevert:
+		if mac {
+			return "Revert to Saved", ""
+		}
+		return "Revert", ""
 	case RoleQuit:
 		if mac {
 			return "Quit " + name, "Cmd+Q"
@@ -610,6 +677,31 @@ func roleDefaults(r MenuRole) (label, accel string) {
 		return "Edit", ""
 	case RoleViewMenu:
 		return "View", ""
+	case RoleFormatMenu:
+		return "Format", ""
+	case RoleBold:
+		return "Bold", "CmdOrCtrl+B"
+	case RoleItalic:
+		return "Italic", "CmdOrCtrl+I"
+	case RoleUnderline:
+		return "Underline", "CmdOrCtrl+U"
+	case RoleStrikethrough:
+		return "Strikethrough", "Shift+CmdOrCtrl+X"
+	case RoleAlignLeft:
+		if mac {
+			return "Align Left", "Cmd+{"
+		}
+		return "Align Left", "Ctrl+L"
+	case RoleAlignCenter:
+		if mac {
+			return "Center", "Cmd+|"
+		}
+		return "Center", "Ctrl+E"
+	case RoleAlignRight:
+		if mac {
+			return "Align Right", "Cmd+}"
+		}
+		return "Align Right", "Ctrl+R"
 	}
 	return string(r), ""
 }
@@ -631,10 +723,28 @@ func roleSubmenu(r MenuRole) []*MenuItem {
 			{Role: RoleQuit},
 		}
 	case RoleFileMenu:
+		if hasDocuments() {
+			// DocumentGroup's File menu on macOS; KStandardAction's and
+			// Notepad's elsewhere.
+			if mac {
+				return []*MenuItem{
+					{Role: RoleNew}, {Role: RoleOpen}, {Role: RoleOpenRecent}, Separator(),
+					{Role: RoleClose}, {Role: RoleSave}, {Role: RoleDuplicate},
+					{Role: RoleRename}, {Role: RoleMoveTo}, {Role: RoleRevert},
+				}
+			}
+			return []*MenuItem{
+				{Role: RoleNew}, {Role: RoleOpen}, {Role: RoleOpenRecent}, Separator(),
+				{Role: RoleSave}, {Role: RoleSaveAs}, {Role: RoleRevert}, Separator(),
+				{Role: RoleClose}, Separator(), {Role: RoleQuit},
+			}
+		}
 		if mac {
 			return []*MenuItem{{Role: RoleClose}}
 		}
 		return []*MenuItem{{Role: RoleQuit}}
+	case RoleOpenRecent:
+		return recentMenuItems()
 	case RoleEditMenu:
 		items := []*MenuItem{
 			{Role: RoleUndo},
@@ -657,6 +767,17 @@ func roleSubmenu(r MenuRole) []*MenuItem {
 			)
 		}
 		return append(items, &MenuItem{Role: RoleDelete}, Separator(), &MenuItem{Role: RoleSelectAll})
+	case RoleFormatMenu:
+		return []*MenuItem{
+			{Role: RoleBold},
+			{Role: RoleItalic},
+			{Role: RoleUnderline},
+			{Role: RoleStrikethrough},
+			Separator(),
+			{Role: RoleAlignLeft},
+			{Role: RoleAlignCenter},
+			{Role: RoleAlignRight},
+		}
 	case RoleViewMenu:
 		return []*MenuItem{
 			{Role: RoleReload},
@@ -684,9 +805,13 @@ func roleSubmenu(r MenuRole) []*MenuItem {
 }
 
 // defaultMenu is installed when the app does not set one. Only macOS gets a
-// default menu bar: it hosts the standard shortcuts (copy, paste, quit, ...).
+// default menu bar: it hosts the standard shortcuts (copy, paste, quit, ...),
+// and apps with documents, whose File menu saves them.
 func defaultMenu() *Menu {
 	if runtime.GOOS != "darwin" {
+		if hasDocuments() {
+			return NewMenu([]*MenuItem{{Role: RoleFileMenu}, {Role: RoleEditMenu}})
+		}
 		return nil
 	}
 	return NewMenu([]*MenuItem{

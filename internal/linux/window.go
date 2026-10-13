@@ -70,6 +70,10 @@ type window struct {
 	flyoutSize                  platform.Size
 	placed, grabbed, dismissing bool
 	unmaps                      int
+	// layer tells that a panel is a layer surface (layer.go), put at
+	// layerAt, or centered by the compositor without it.
+	layer   bool
+	layerAt *platform.Point
 
 	closed       bool
 	programmatic bool
@@ -161,6 +165,9 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
 	}
 	w.win = gtkWindowNew(typ)
 	gtkWindowSetTitle(w.win, cs(o.Title))
+	if o.Panel {
+		w.initLayer() // before anything realizes the window
+	}
 	if o.Center {
 		gtkWindowSetPosition(w.win, 1) // GTK_WIN_POS_CENTER
 	} else {
@@ -217,7 +224,7 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
 	}
 	w.accel = gtkAccelGroupNew()
 	gtkWindowAddAccelGroup(w.win, w.accel)
-	if b.appMenu != nil && o.Flyout == nil {
+	if b.appMenu != nil && w.hasAppMenu() {
 		w.installMenu(b.appMenu)
 	}
 	// GTK sizes the window inside the window manager's frame, with the menu
@@ -231,6 +238,9 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
 		width, height = width-f.left-f.right, height-f.top-f.bottom
 	}
 	gtkWindowSetDefaultSize(w.win, max(width, 1), max(height, 1))
+	if w.layer {
+		w.sizeLayer(max(width, 1), max(height, 1))
+	}
 
 	connect(w.win, "delete-event", cbDeleteEvent, data)
 	connect(w.win, "destroy", cbDestroy, data)
@@ -245,7 +255,7 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
 	if w.web != 0 {
 		b.byWebView[w.web] = w
 	}
-	if o.Frameless && o.Flyout == nil && b.announceCSD != nil {
+	if o.Frameless && o.Flyout == nil && !w.layer && b.announceCSD != nil {
 		// GTK asks a Wayland compositor that speaks
 		// org_kde_kwin_server_decoration (KWin, COSMIC, Sway…) to decorate
 		// every window it does not decorate itself, an undecorated one
@@ -257,6 +267,9 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
 	gtkWidgetShowAll(w.box)
 	if o.Flyout != nil {
 		w.initFlyout()
+	}
+	if o.Panel {
+		w.initPanel()
 	}
 	if o.FullScreen {
 		gtkWindowFullscreen(w.win)
@@ -378,6 +391,10 @@ func (w *window) WebViewHandle() uintptr { return w.web }
 func (w *window) SetTitle(title string) { gtkWindowSetTitle(w.win, cs(title)) }
 func (w *window) Title() string         { return goStr(gtkWindowGetTitle(w.win)) }
 
+// The core marks the title of an edited document; GTK shows no file.
+func (w *window) SetRepresentedFile(string) {}
+func (w *window) SetDocumentEdited(bool)    {}
+
 // extents are the widths of the edges around a rectangle.
 type extents struct{ left, top, right, bottom int32 }
 
@@ -453,7 +470,13 @@ func (w *window) contentInsets() extents {
 
 // SetBounds asks for the bounds of the window manager's frame: GTK moves
 // the frame and sizes the window inside it.
-func (w *window) SetBounds(r platform.Rect) { w.setBounds(r, false) }
+func (w *window) SetBounds(r platform.Rect) {
+	if w.layer {
+		w.setLayerBounds(r)
+		return
+	}
+	w.setBounds(r, false)
+}
 
 func (w *window) SetContentBounds(r platform.Rect) {
 	w.setBounds(w.frameExtents().grow(w.contentInsets().grow(r)), true)
@@ -509,6 +532,9 @@ func (w *window) constrain(width, height int32) (int32, int32) {
 // Bounds returns the bounds of the window manager's frame, which are the
 // window's own without one.
 func (w *window) Bounds() platform.Rect {
+	if w.layer {
+		return w.layerBounds()
+	}
 	if w.requested != nil {
 		return *w.requested
 	}
@@ -579,9 +605,9 @@ func (w *window) IsResizable() bool   { return gtkWindowGetResizable(w.win) }
 func (w *window) SetMovable(bool)     {}
 func (w *window) IsMovable() bool     { return true }
 func (w *window) SetMinimizable(bool) {}
-func (w *window) IsMinimizable() bool { return true }
+func (w *window) IsMinimizable() bool { return !w.opts.Panel }
 func (w *window) SetMaximizable(bool) {}
-func (w *window) IsMaximizable() bool { return gtkWindowGetResizable(w.win) }
+func (w *window) IsMaximizable() bool { return gtkWindowGetResizable(w.win) && !w.opts.Panel }
 func (w *window) SetClosable(v bool) {
 	gtkWindowSetDeletable(w.win, v)
 	if w.controls != nil {
@@ -604,6 +630,9 @@ func (w *window) Show() {
 		w.showFlyout(w.flyout.Focusable)
 		return
 	}
+	if w.layer {
+		w.layerKeyboard(true)
+	}
 	w.willShow()
 	gtkWidgetShow(w.win)
 	gtkWindowPresent(w.win)
@@ -613,6 +642,9 @@ func (w *window) ShowInactive() {
 	if w.opts.Flyout != nil {
 		w.showFlyout(false)
 		return
+	}
+	if w.layer {
+		w.layerKeyboard(false)
 	}
 	w.willShow()
 	gtkWidgetShow(w.win)
@@ -661,6 +693,9 @@ func (w *window) Focus() {
 		return
 	}
 	w.b.dismissFlyouts(w)
+	if w.layer {
+		w.layerKeyboard(true)
+	}
 	w.willShow() // presenting shows a hidden window
 	gtkWindowPresent(w.win)
 }
@@ -726,6 +761,10 @@ func (w *window) DroppedFiles() []string {
 }
 
 func (w *window) Center() {
+	if w.layer {
+		w.centerLayer()
+		return
+	}
 	b := w.Bounds()
 	for _, d := range (screen{}).Displays() {
 		if d.Primary {

@@ -344,7 +344,7 @@ func (ed *editor) command(c *context, name string) {
 			h.writeClipboard(ed.selectedText())
 			ed.insert("")
 		}
-	case "paste":
+	case "paste", "pasteAndMatchStyle":
 		s := h.readClipboard()
 		if ed.onPaste != nil {
 			// The frame builds again, showing what fn changed in the

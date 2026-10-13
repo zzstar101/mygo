@@ -145,6 +145,56 @@ mygo.Shell.TrashItem(path)                     // to the trash
 mygo.Shell.Beep()
 ```
 
+`FileIcon` returns the icon the file manager shows for a file, a folder
+or an application, as a PNG of the size asked for in pixels: pass the size
+in DIPs times the display's scale factor.
+
+```go
+png, err := mygo.Shell.FileIcon("/Applications/Safari.app", 64)
+```
+
+On macOS it is Finder's icon (`NSWorkspace`), drawn from the
+representation that fits the size best; a symbolic link has the icon of
+what it points to, without Finder's arrow. On Windows it is Explorer's
+(`IShellItemImageFactory`, icons only, no thumbnails), and the path may
+also name a shell item, such as an app of the Start menu by
+`shell:AppsFolder\<AppUserModelID>`. On Linux it is the icon of the file's
+content type from the icon theme, and for a desktop entry (`.desktop`), the
+icon of its application, or where the theme has none, that of desktop
+entries.
+
+`InstalledApps` lists the applications installed on the computer, sorted
+by name, as a launcher shows them, and `LaunchApp` starts one, or brings
+it to the front:
+
+```go
+go func() {
+	apps, err := mygo.Shell.InstalledApps() // reads the disk: off the main thread
+	if err != nil {
+		return
+	}
+	for _, app := range apps {
+		fmt.Println(app.Name, app.ID)
+	}
+	icon, _ := mygo.Shell.FileIcon(apps[0].Path, 64)
+	_ = mygo.Shell.LaunchApp(apps[0])
+}()
+```
+
+Each app has the `Name` the system shows, in the user's language, an
+`ID` and the `Path` whose icon `FileIcon` draws:
+
+| | the apps | `ID` | `Path` |
+|---|---|---|---|
+| macOS | the `.app` bundles of `/Applications`, `/System/Applications`, `~/Applications` and CoreServices' `Applications`, and of their folders (Utilities), plus Finder; an app behind symbolic links once, at the link, as `/Applications/Safari.app` | the bundle identifier, or the path for a bundle without one | the bundle |
+| Windows | the Start menu's All apps, desktop and packaged apps alike (the shell's Applications folder) | the AppUserModelID, or for a desktop app without one, its path under a known folder | `shell:AppsFolder\<ID>` |
+| Linux | the desktop entries menus show (not `NoDisplay`, `Hidden`, or meant for another desktop) | the desktop file ID, such as `org.gnome.Nautilus.desktop` | the desktop entry |
+
+`InstalledApps` does not block the main thread when called from another
+goroutine, and returns in tens of milliseconds. Drawing icons takes a few
+milliseconds each, on the main thread: draw those that show, and keep
+them.
+
 ## Displays
 
 `mygo.Screen` describes the connected displays, in device-independent

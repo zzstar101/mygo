@@ -594,10 +594,10 @@ func TestSpans(t *testing.T) {
 
 func TestEncodeSpans(t *testing.T) {
 	spans := []Span{{End: 3, Family: "A, B", Size: 1.5, Weight: 600, Italic: true, LetterSpacing: -0.5, Features: "tnum"}, {End: 9}}
-	if got := decodeSpans(EncodeSpans(spans)); !slices.Equal(got, spans) {
+	if got := DecodeSpans(EncodeSpans(spans)); !slices.Equal(got, spans) {
 		t.Errorf("decoded %+v, want %+v", got, spans)
 	}
-	if got := decodeSpans(EncodeSpans(spans)[:5]); len(got) != 0 {
+	if got := DecodeSpans(EncodeSpans(spans)[:5]); len(got) != 0 {
 		t.Errorf("a cut encoding decodes to %+v", got)
 	}
 	// The spans of a paragraph, relative to it.

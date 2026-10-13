@@ -79,6 +79,9 @@ func (w *window) SetTitle(t string) {
 
 func (w *window) Title() string { return w.title }
 
+func (w *window) SetRepresentedFile(string) {}
+func (w *window) SetDocumentEdited(bool)    {}
+
 // bounds returns the window's element's rectangle in the page.
 func (w *window) bounds() platform.Rect {
 	r := w.el.Call("getBoundingClientRect")

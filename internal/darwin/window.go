@@ -31,6 +31,7 @@ const (
 	nsNormalWindowLevel      = 0
 	nsViewWidthHeightSizable = 2 | 16
 
+	collectionCanJoinAllSpaces    = 1 << 0
 	collectionTransient           = 1 << 3
 	collectionIgnoresCycle        = 1 << 6
 	collectionFullScreenPrimary   = 1 << 7
@@ -133,7 +134,15 @@ func (w *window) create() {
 		content = msgRectForRect(class("NSWindow"), sel("contentRectForFrameRect:styleMask:"), size, style)
 		content.Origin = NSPoint{}
 	}
-	w.win = msgInitWindow(send(class("MyGoWindow"), "alloc"), sel("initWithContentRect:styleMask:backing:defer:"),
+	cls := "MyGoWindow"
+	if o.Panel {
+		// The nonactivating style must be there from the start: the window
+		// server only learns that the window never activates its app from
+		// the style it is created with.
+		cls = "MyGoPanel"
+		style |= styleNonactivatingPanel
+	}
+	w.win = msgInitWindow(send(class(cls), "alloc"), sel("initWithContentRect:styleMask:backing:defer:"),
 		content, style, nsBackingStoreBuffered, false)
 	send(w.win, "setReleasedWhenClosed:", 0)
 	w.delegate = alloc("MyGoWindowDelegate")
@@ -163,9 +172,19 @@ func (w *window) create() {
 		w.SetMaximumSize(o.MaxSize)
 	}
 	send(w.win, "setMovable:", boolArg(o.Movable))
+	if !o.Maximizable {
+		w.SetMaximizable(false)
+	}
 	behavior := uint(collectionFullScreenPrimary)
 	if !o.Fullscreenable {
 		behavior = collectionFullScreenNone
+	}
+	if o.Panel {
+		// On the Space the user is on, full-screen ones included, as they
+		// switch, and out of Mission Control and the window cycle.
+		behavior = collectionCanJoinAllSpaces | collectionFullScreenAuxiliary | collectionIgnoresCycle | collectionTransient
+		// A panel stays as the app is deactivated: the app hides it.
+		send(w.win, "setHidesOnDeactivate:", 0)
 	}
 	send(w.win, "setCollectionBehavior:", uintptr(behavior))
 	if o.AlwaysOnTop {
@@ -438,6 +457,27 @@ func (w *window) SetTitle(title string) {
 	w.layoutTrafficLights()
 }
 
+// SetRepresentedFile shows the file's proxy icon in the title bar, which
+// the user drags, and whose ⌘-click menu lists its folders.
+func (w *window) SetRepresentedFile(path string) {
+	withPool(func() {
+		var url id
+		if path != "" {
+			url = fileURL(path)
+		}
+		send(w.win, "setRepresentedURL:", uintptr(url))
+	})
+	// AppKit lays the title bar's buttons out again.
+	w.layoutTrafficLights()
+}
+
+// SetDocumentEdited shows the dot in the close button, and dims the proxy
+// icon.
+func (w *window) SetDocumentEdited(edited bool) {
+	send(w.win, "setDocumentEdited:", boolArg(edited))
+	w.layoutTrafficLights()
+}
+
 func (w *window) Title() string {
 	var s string
 	withPool(func() { s = goString(send(w.win, "title")) })
@@ -532,7 +572,9 @@ func (w *window) Show() {
 	if w.parent != nil && !w.parent.closed {
 		send(w.parent.win, "addChildWindow:ordered:", uintptr(w.win), 1)
 	}
-	send(w.b.app, "activateIgnoringOtherApps:", 1)
+	if !w.opts.Panel {
+		send(w.b.app, "activateIgnoringOtherApps:", 1)
+	}
 }
 
 // showFlyout shows a flyout above its parent, as its child window, and
@@ -726,7 +768,9 @@ func (w *window) Focus() {
 		return
 	}
 	send(w.win, "makeKeyAndOrderFront:", 0)
-	send(w.b.app, "activateIgnoringOtherApps:", 1)
+	if !w.opts.Panel {
+		send(w.b.app, "activateIgnoringOtherApps:", 1)
+	}
 }
 
 func (w *window) Blur() { send(w.win, "orderBack:", 0) }
@@ -1321,6 +1365,19 @@ func registerWindowClasses() {
 		method("canBecomeMainWindow", func(self id, _ objc.SEL) bool { return true }),
 		method("selectKeyViewFollowingView:", selectKeyView("MyGoWindow", false)),
 		method("selectKeyViewPrecedingView:", selectKeyView("MyGoWindow", true)),
+	})
+
+	// A panel (WindowOptions.Panel) takes the keyboard, without
+	// activating the app, and is never the main window.
+	classDef("MyGoPanel", "NSPanel", nil, []objc.MethodDef{
+		method("canBecomeKeyWindow", func(self id, _ objc.SEL) bool { return true }),
+		method("canBecomeMainWindow", func(self id, _ objc.SEL) bool { return false }),
+		// NSPanel closes on an Escape its content leaves (cancelOperation:),
+		// past windowShouldClose: MyGo closes it then, as the user closing
+		// it, which OnClose listeners may prevent.
+		method("cancelOperation:", func(self id, _ objc.SEL, sender id) {}),
+		method("selectKeyViewFollowingView:", selectKeyView("MyGoPanel", false)),
+		method("selectKeyViewPrecedingView:", selectKeyView("MyGoPanel", true)),
 	})
 
 	// A flyout's panel becomes the key window only when it takes the

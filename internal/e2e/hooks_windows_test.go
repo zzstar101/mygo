@@ -59,8 +59,10 @@ func drag(w *mygo.Window, points [][2]float64) (ok bool) {
 
 func webViewAttached(*mygo.Window) (bool, bool) { return false, false }
 
-// Collection behaviors are macOS's.
+// Collection behaviors and deactivating the app are macOS's.
 func collectionBehavior(*mygo.Window) (uint, bool) { return 0, false }
+func deactivateApp() bool                          { return false }
+func appActive() (bool, bool)                      { return false, false }
 
 // WebView2 opens DevTools in a window of its own.
 func dockDevTools(*mygo.Window) bool { return false }
@@ -333,4 +335,18 @@ func axAttribute(*mygo.Window, string, string) (string, bool, bool, bool) {
 func pressEscape(*mygo.Window) bool {
 	mygo.RunOnMain(func() { win.TestPressKeys(0x1B) }) // VK_ESCAPE
 	return true
+}
+
+// Windows shows no document but the title.
+func documentChrome(w *mygo.Window) (title, file string, icon, edited, supported bool) {
+	mygo.RunOnMain(func() { title = win.TestWindowTitle(w.NativeHandle()) })
+	return title, "", false, false, true
+}
+
+func sheet(*mygo.Window) ([]string, []string, bool, bool) { return nil, nil, false, false }
+func endSheetButton(*mygo.Window, int) bool               { return false }
+
+func panelStyles(w *mygo.Window) (tool, topmost, owned, supported bool) {
+	mygo.RunOnMain(func() { tool, topmost, owned = win.TestPanelStyles(w.NativeHandle()) })
+	return tool, topmost, owned, true
 }

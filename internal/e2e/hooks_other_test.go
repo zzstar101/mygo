@@ -30,8 +30,10 @@ func sideButton(*mygo.Window, bool) bool { return false }
 
 func webViewAttached(*mygo.Window) (bool, bool) { return false, false }
 
-// Collection behaviors are macOS's.
+// Collection behaviors and deactivating the app are macOS's.
 func collectionBehavior(*mygo.Window) (uint, bool) { return 0, false }
+func deactivateApp() bool                          { return false }
+func appActive() (bool, bool)                      { return false, false }
 
 func dockDevTools(*mygo.Window) bool { return false }
 
@@ -139,3 +141,12 @@ func axAttribute(*mygo.Window, string, string) (string, bool, bool, bool) {
 }
 
 func pressEscape(*mygo.Window) bool { return false }
+
+func documentChrome(*mygo.Window) (string, string, bool, bool, bool) {
+	return "", "", false, false, false
+}
+func sheet(*mygo.Window) ([]string, []string, bool, bool) { return nil, nil, false, false }
+func endSheetButton(*mygo.Window, int) bool               { return false }
+
+// Panels' window styles are Windows'.
+func panelStyles(*mygo.Window) (bool, bool, bool, bool) { return false, false, false, false }

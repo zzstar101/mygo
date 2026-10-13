@@ -46,6 +46,12 @@ order the paragraphs were built. Select All selects the whole container,
 including built paragraphs outside its viewport. Inline text and links
 inside a paragraph are copied as part of that paragraph.
 
+`CopyData` on the container sets what Copy writes from the parts of the
+paragraphs selected, as a document joins them with blank lines as text
+and writes HTML too to keep their formatting, and
+`SelectedTexts` returns those parts, for a menu item copying them
+otherwise. A paragraph whose text grows at its end keeps the selection.
+
 Nested `Selectable` containers have separate selections. Buttons and
 text inputs keep their own interaction; their labels do not join the
 container's selection. Use `Unselectable` on a text or a container to
@@ -65,7 +71,9 @@ replaces that menu, and `Menu.EditItems` puts Copy and Select All in it.
 `ui.RichText` mixes styles in one paragraph: each `ui.Span` sets what it
 changes (font, size, weight, italics, color, underlines, strikethrough,
 their color and thickness, a background, letter spacing, features) over
-the style of the text, and the spans wrap together:
+the style of the text, and the spans wrap together. A `Radius` rounds a
+span's background, which then hugs its glyphs rather than filling the
+line, as code within text shows:
 
 ```go
 ui.RichText(c,
@@ -73,6 +81,11 @@ ui.RichText(c,
 	ui.Span{Text: "report.pdf", Weight: 600},
 	ui.Span{Text: " to "},
 	ui.Span{Text: "Documents", Color: t.Accent, Underline: true},
+)
+
+ui.RichText(c,
+	ui.Span{Text: "Run "},
+	ui.Span{Text: "go test", Font: "monospace", Background: t.Surface, Radius: 4},
 )
 
 ui.RichText(c,

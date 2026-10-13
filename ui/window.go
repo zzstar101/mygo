@@ -487,6 +487,23 @@ func (h *windowHost) writeClipboard(s string) {
 	}
 }
 
+func (h *windowHost) readClipboardData(formats []transfer.Format) transfer.Data {
+	if h.conn.Clipboard == nil {
+		return transfer.Data{}
+	}
+	d, err := h.conn.Clipboard.ReadData(formats)
+	if err != nil && len(d.Items()) == 0 {
+		return transfer.Data{}
+	}
+	return d
+}
+
+func (h *windowHost) writeClipboardData(d transfer.Data) {
+	if h.conn.Clipboard != nil {
+		h.conn.Clipboard.WriteData(d, nil)
+	}
+}
+
 func (h *windowHost) startDrag() {
 	if h.conn.StartDrag != nil {
 		h.conn.StartDrag()

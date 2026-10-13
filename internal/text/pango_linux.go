@@ -168,6 +168,7 @@ var pangoLib struct {
 	attrSizeAbsoluteNew       func(size int32) uintptr
 	attrWeightNew             func(weight int32) uintptr
 	attrStyleNew              func(style int32) uintptr
+	attrShapeNew              func(ink, logical *pangoRectangle) uintptr
 	fontMapConfigChanged      func(fontMap uintptr)
 	cairoFontOptionsCreate    func() uintptr
 	cairoFontOptionsDestroy   func(options uintptr)
@@ -287,6 +288,7 @@ func loadPango() error {
 	bind(pango, &l.attrSizeAbsoluteNew, "pango_attr_size_new_absolute")
 	bind(pango, &l.attrWeightNew, "pango_attr_weight_new")
 	bind(pango, &l.attrStyleNew, "pango_attr_style_new")
+	bind(pango, &l.attrShapeNew, "pango_attr_shape_new")
 	bind(cairo, &l.cairoFontOptionsCreate, "cairo_font_options_create")
 	bind(cairo, &l.cairoFontOptionsDestroy, "cairo_font_options_destroy")
 	bind(cairo, &l.cairoFontOptionsAntialias, "cairo_font_options_set_antialias")
@@ -664,6 +666,7 @@ func (e *pangoEngine) attributes(style Style, spans []Span, text []rune) uintptr
 	for _, sp := range spans {
 		to := max(from, min(sp.End, len(text)))
 		b0, b1 := at[from], at[to]
+		start := from
 		from = to
 		if b1 == b0 {
 			continue
@@ -682,6 +685,15 @@ func (e *pangoEngine) attributes(style Style, spans []Span, text []rune) uintptr
 		}
 		add(spacing(sp.LetterSpacing), b0, b1)
 		add(features(sp.Features), b0, b1)
+		if sp.ObjectWidth > 0 {
+			// Each rune an inline object: a shape of its size standing on
+			// the baseline, in its own attribute.
+			box := pangoRectangle{y: -int32(math.Round(float64(sp.ObjectHeight) * pangoScale)),
+				width: int32(math.Round(float64(sp.ObjectWidth) * pangoScale)), height: int32(math.Round(float64(sp.ObjectHeight) * pangoScale))}
+			for k := start; k < to; k++ {
+				add(l.attrShapeNew(&box, &box), at[k], at[k+1])
+			}
+		}
 	}
 	return list
 }

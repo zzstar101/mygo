@@ -27,9 +27,19 @@ type Span struct {
 	DecorationColor     Color
 	DecorationThickness float32
 	// Background highlights the span, as search results are.
-	Background    Color
+	Background Color
+	// Radius rounds the corners of the Background, which then hugs the
+	// span's glyphs, a little wider than them, rather than filling the
+	// line, as code within text shows.
+	Radius        float32
 	LetterSpacing float32
 	Features      string // as for Element.FontFeatures, comma separated
+	// ObjectWidth and ObjectHeight, when ObjectWidth is set, make each
+	// rune of the span, an object replacement character (U+FFFC), an
+	// inline object: a box of that size in DIPs standing on the baseline,
+	// which lines break around and which draws nothing, where a rich text
+	// editor draws an image (TextLayout.Objects).
+	ObjectWidth, ObjectHeight float32
 }
 
 // RichText creates a text whose spans differ in style, over the style of
@@ -95,6 +105,9 @@ type spanCache struct {
 	styles []text.Span
 	key    string
 	paints bool
+	// inline holds the spans of a paragraph with elements inside it, its
+	// own and theirs, made again each frame (inlineSpans).
+	inline []Span
 }
 
 // spanCache returns the element's spanCache, making it the first time.
@@ -154,7 +167,8 @@ func (sc *spanCache) update(spans []Span) {
 // spanStyle returns the style of a span ending at rune end, for its
 // layout.
 func spanStyle(s Span, end int) text.Span {
-	return text.Span{End: end, Family: s.Font, Size: s.Size, Weight: s.Weight, Italic: s.Italic, LetterSpacing: s.LetterSpacing, Features: s.Features}
+	return text.Span{End: end, Family: s.Font, Size: s.Size, Weight: s.Weight, Italic: s.Italic, LetterSpacing: s.LetterSpacing, Features: s.Features,
+		ObjectWidth: s.ObjectWidth, ObjectHeight: s.ObjectHeight}
 }
 
 // encodeSpans encodes the styles of spans for a layout.
@@ -315,9 +329,16 @@ func (sp *spanPaint) backgrounds(p *Painter, line *text.Line, x, y float32) {
 		saved := p.transform
 		p.transform = saved.Mul(p.inlineTransform(line.Glyphs[i].Cluster))
 		defer func() { p.transform = saved }()
-		if k >= 0 && sp.spans[k].Background.A > 0 {
-			p.Fill(Rect{x + x0, y + line.Y, x1 - x0, line.Height}, sp.spans[k].Background, 0)
+		if k < 0 || sp.spans[k].Background.A == 0 {
+			return
 		}
+		if r := sp.spans[k].Radius; r > 0 {
+			size := line.Glyphs[i].Size
+			px := min(size*0.22, r)
+			p.Fill(Rect{x + x0 - px, y + line.Baseline - size*0.98, x1 - x0 + 2*px, size * 1.32}, sp.spans[k].Background, r)
+			return
+		}
+		p.Fill(Rect{x + x0, y + line.Y, x1 - x0, line.Height}, sp.spans[k].Background, 0)
 	})
 }
 

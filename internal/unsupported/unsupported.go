@@ -81,6 +81,10 @@ func (app) AddRecentDocument(string) error                    { return errUnsupp
 func (app) ClearRecentDocuments() error                       { return errUnsupported }
 func (app) SetJumpListTasks([]platform.JumpListTask) error    { return errUnsupported }
 
+func (app) ListCookies(done func([]platform.Cookie, error))     { done(nil, platform.ErrUnsupported) }
+func (app) SetCookie(_ platform.Cookie, done func(error))       { done(platform.ErrUnsupported) }
+func (app) DeleteCookie(_ platform.CookieKey, done func(error)) { done(platform.ErrUnsupported) }
+
 type dialogs struct{}
 
 func (dialogs) ShowOpenDialog(_ platform.Window, _ *platform.OpenDialogOptions, cb func([]string, error)) {
@@ -114,11 +118,15 @@ func (clipboard) AvailableFormats() []string { return nil }
 
 type shell struct{}
 
-func (shell) OpenExternal(string) error { return errUnsupported }
-func (shell) OpenPath(string) error     { return errUnsupported }
-func (shell) ShowItemInFolder(string)   {}
-func (shell) TrashItem(string) error    { return errUnsupported }
-func (shell) Beep()                     {}
+func (shell) OpenExternal(string) error            { return errUnsupported }
+func (shell) OpenPath(string) error                { return errUnsupported }
+func (shell) ShowItemInFolder(string)              {}
+func (shell) TrashItem(string) error               { return errUnsupported }
+func (shell) Beep()                                {}
+func (shell) FileIcon(string, int) ([]byte, error) { return nil, errUnsupported }
+func (shell) OpenApplication(string) error         { return errUnsupported }
+
+func (*Backend) Applications() ([]platform.Application, error) { return nil, errUnsupported }
 
 type screen struct{}
 

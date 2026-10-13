@@ -58,7 +58,7 @@ func (ed *editor) dispatch(ev ui.InputEvent) bool {
 	case ui.InputKeyDown:
 		return ed.key(ev)
 	case ui.InputCommand:
-		cmd := map[string]Command{"copy": Copy, "cut": Cut, "paste": Paste, "selectAll": SelectAll,
+		cmd := map[string]Command{"copy": Copy, "cut": Cut, "paste": Paste, "pasteAndMatchStyle": Paste, "selectAll": SelectAll,
 			"undo": Undo, "redo": Redo, "delete": Backspace}[ev.Text]
 		if cmd != NoCommand {
 			ed.run(cmd)

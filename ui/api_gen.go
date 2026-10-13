@@ -382,6 +382,18 @@ func (_handle *Context) Root() Element {
 	return wrapElement(_ctx.Root())
 }
 
+// isPath reports whether a link's target is a path within the app, as
+// "/notes/42", "edit" or "?tab=info", rather than a URL with a scheme.
+// Router returns the router whose page is being built, which a Link to a
+// path without a scheme goes through, or nil outside one.
+func (_handle *Context) Router() *Router {
+	_ctx := _handle.build()
+	if _ctx == nil {
+		return nil
+	}
+	return _ctx.Router()
+}
+
 // SetTheme makes the frame use t, for the window's root and the widgets
 // created after the call.
 func (_handle *Context) SetTheme(t *Theme) {
@@ -2773,6 +2785,21 @@ func (_handle Element) ContextMenu(build func(m *Menu)) Element {
 	return wrapElement(_node.ContextMenu(build))
 }
 
+// CopyData sets what Copy, its shortcut and the context menu's put on
+// the clipboard for the selection of a Selectable container: fn gets its
+// parts, as SelectedTexts returns them, and returns the data, as a
+// document copies its paragraphs with blank lines between them as text
+// (transfer.TextData), and as HTML too to keep their formatting.
+func (_handle Element) CopyData(fn func(parts []SelectedText) transfer.Data) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.CopyData(fn))
+}
+
 // Cursor sets the pointer's shape over the element.
 func (_handle Element) Cursor(c Cursor) Element {
 	_node := _handle.node()
@@ -4495,6 +4522,20 @@ func (_handle Element) Selected(on bool) Element {
 	return wrapElement(_node.Selected(on))
 }
 
+// SelectedTexts returns the parts of the paragraphs that the selection of
+// a Selectable container holds, in the order they were built, or none,
+// as of the last frame: to copy them otherwise, as a context menu's item
+// does.
+func (_handle Element) SelectedTexts() []SelectedText {
+	_node := _handle.node()
+	if _node == nil {
+		return nil
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.SelectedTexts()
+}
+
 // SelectionColor sets the highlight of selected text in the element and
 // the text inside it, as text on a colored bubble needs one that shows
 // on it; the theme's Selection is the highlight elsewhere.
@@ -4506,6 +4547,19 @@ func (_handle Element) SelectionColor(c Color) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.SelectionColor(c))
+}
+
+// SetChanged reports the element's value as changed in this build pass,
+// as a widget of your own whose input changed what it edits: Changed
+// returns true for it, as for the widgets' own.
+func (_handle Element) SetChanged() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.SetChanged())
 }
 
 // SetTextSelection selects the runes of a text input from start to end, or

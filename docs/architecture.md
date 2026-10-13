@@ -57,8 +57,10 @@ framework safely. Read it before changing anything under `internal/`.
 ├── protocol.go         custom schemes served by http.Handler, FileServer
 ├── frontend.go         the app's frontend: relative URLs, devUrl, mygo://localhost
 ├── menu.go             Menu/MenuItem model, roles, native item updates
+├── cookies.go          Cookies: the pages' cookies, checked and keyed by name, domain and path
 ├── dialog.go modules.go clipboard.go: shell, clipboard, screen, theme, tray, shortcuts, notifications
 ├── watch.go watch_scan.go: WatchFiles, and what a watch saw of its directory
+├── document*.go        NewDocuments: documents, their saving, recovery copies, watches, menus
 ├── loop.go             main-thread queue: postMain / onMain / await
 ├── events.go           listener lists and the Preventable event types
 ├── single_instance.go  RequestSingleInstanceLock over a Unix socket
@@ -113,7 +115,8 @@ framework safely. Read it before changing anything under `internal/`.
 ├── examples/           hello, todo, frameless, native; counter-native, vibrancy,
 │                       effort-slider, flyout, menubar-flyout, piano, farm
 │                       and mayoi (games), code-editor and gallery (native
-│                       UI); webview (web views in native UI)
+│                       UI); webview (web views in native UI); launcher
+│                       (a Spotlight-like panel, native UI)
 ├── docs/               the user guides, the official plugins' pages
 │                       (plugins/), and this architecture guide
 └── website/            the website, with these docs: TanStack Start, prerendered
@@ -434,11 +437,13 @@ purego gives three primitives, used everywhere:
 - **ABI.** On x64, structs over 8 bytes are passed by reference and Go
   mirrors the first integer arguments into the XMM registers, so doubles can
   be passed as bits. On ARM64, 16-byte structs travel in two registers and
-  floats cannot be passed, so zoom falls back to CSS (`abi_*.go`). Go
-  callbacks read only integer registers: the two methods of UI Automation
-  that take doubles enter through thunks in assembly (`uia_*.s`), which
-  move the doubles' bits to the integer registers of their positions,
-  touching only registers a call may change, and jump to the callbacks.
+  `syscall` cannot pass floats, so zoom falls back to CSS (`abi_*.go`);
+  `comCallFloat` calls methods taking a double through purego instead,
+  as `put_Expires` of cookies. Go callbacks read only integer registers:
+  the two methods of UI Automation that take doubles enter through thunks
+  in assembly (`uia_*.s`), which move the doubles' bits to the integer
+  registers of their positions, touching only registers a call may
+  change, and jump to the callbacks.
 - DPI: the process is per-monitor aware (v2); the backend converts between
   pixels and DIPs with the window's or monitor's DPI. Frameless windows, and
   those with a hidden title bar, drop the caption in `WM_NCCALCSIZE` but
@@ -1320,6 +1325,41 @@ as in Tauri:
   hears as the key window changing. The design follows GPUI's
   `WindowKind::AnchoredPopup` and winit's `WindowType::Popup`, which
   model xdg_positioner too.
+- Panels (`WindowOptions.Panel`), the windows of launchers: the core makes
+  them always on top, out of the taskbar, unable to minimize, maximize or
+  go full screen, and closes them on an Escape the content leaves, as
+  flyouts. macOS makes a `MyGoPanel`, an `NSPanel` with the nonactivating
+  style from `initWithContentRect:` on (the window server learns that a
+  window never activates its app from the style it is created with; a
+  style set later needs the private `_setPreventsActivation:`, as Electron
+  and tauri-nspanel found), never the main window, on every Space as a
+  full-screen auxiliary, outside Mission Control and the window cycle, at
+  the floating level (above it, input methods' candidate windows would
+  show behind the panel); `Show` and `Focus` make it key without
+  `activateIgnoringOtherApps:`, and its `cancelOperation:` does nothing
+  (NSPanel's closes it past `windowShouldClose:`). The key window of a
+  nonactivating panel gets the keys and the main menu its key
+  equivalents, though the app is not frontmost (`NSApp.isActive` reports
+  it active then). Windows makes a topmost tool window owned by the hidden
+  application window (a tool window alone may get a button on other
+  displays' taskbars, as PowerToys found), its corners rounded as
+  Windows 11 rounds other windows'; the key press of a `RegisterHotKey`
+  shortcut lets the process take the foreground, and hiding the panel
+  gives it back. Linux makes a sticky utility window, kept above, or on
+  Wayland a surface of the overlay layer (`internal/linux/layer.go`):
+  `libgtk-layer-shell.so.0` is loaded with the first panel, if it is
+  there (0.9 patches GTK 3's private structures and intercepts nothing
+  of libwayland, so it may load after GTK), and used where
+  `gtk_layer_is_supported` says the compositor speaks wlr-layer-shell, as
+  Ulauncher does. `gtk_layer_init_for_window` must come before GTK
+  realizes the window. A position is the top and left margins from the
+  edges of the output there (`gdk_display_get_monitor_at_point`), and
+  without one the compositor centers the surface; gtk-layer-shell sizes
+  it by its size request, not its default size. It asks for the keyboard
+  exclusively while it shows: compositors give none to an on-demand
+  surface as it maps, and Sway takes it back from one that goes from
+  exclusive to on demand. Neither Linux nor Windows shows the application
+  menu in a panel.
 - `window.open()` and `target=_blank` go through `SetWindowOpenHandler`. By
   default http(s) URLs open in the default browser. Allowing one creates a
   window around the configuration or related view WebKit provides, with its
@@ -1462,6 +1502,63 @@ main thread, so watches work before the app runs and don't wait on it.
   The handles can't be given to the os package, which would tie them to the
   Go runtime's completion port. A handle closed still completes its I/O,
   which writes to its buffer, so a session lives until its completion.
+
+## Documents (`document*.go`)
+
+`NewDocuments` follows NSDocument and NSDocumentController for the
+bookkeeping and SwiftUI's 2026 `Document` for the shape (a snapshot on the
+main thread, the I/O on goroutines), with the recovery copies of VS Code
+and Zed. Everything is in the core; backends only show a window's
+document (`Window.SetRepresentedFile`, `SetDocumentEdited`) and replace
+files (`Backend.ReplaceFile`).
+
+- *State.* `Document[T]` embeds `docBase`, the state that doesn't depend on
+  the content's type, under one mutex: a change counter (`changes`), the
+  change the file has (`savedAt`) and the recovery copy (`backedUp`), the
+  edited flag, and the file's stamp (modification time and size) as last
+  read or written. `docOps` is what the generic half gives the rest:
+  `capture` takes the content and its change (on the main thread with a
+  `Snapshot`), `markSaved` makes a written snapshot the saved one (with
+  `Equal`, the document stays edited only if the content differs), so
+  edits made during a write stay unsaved, as NSDocument's change count
+  tokens and Zed's `did_save` keep them.
+- *Writes* of a document's file and of its recovery copy hold its `io`
+  mutex, which checks of the disk take too, so a watch never mistakes the
+  document's own write for another app's. `writeFileSafely` writes a
+  sibling, flushes it and replaces the file through the backend
+  (`NSFileManager`, `ReplaceFileW`, rename with mode and owner on Linux),
+  in place for hard links and folders the user can't create files in.
+  Save and autosave stat the file first: a stamp other than the one known
+  is a conflict.
+- *Pacing.* One timer per document fires after the edits stop: the
+  autosave delay for a document saved in place, a second for a recovery
+  copy, shortened so that a document edited without a pause is written at
+  least every 30 or 5 seconds (`dirtySince`).
+- *Recovery copies* live in `PathUserData/Recovery/<kind>/<session>`, a
+  session per running instance with an index of the copies, locked with
+  `flock` or `LockFileEx` while the instance runs; at launch an instance
+  takes the sessions whose lock it gets, reopens their documents edited
+  (in conflict when the file's stamp changed), writes them into its own
+  session, then removes the old ones.
+- *Watches.* One `WatchFiles` per folder of open documents, shared by
+  reference count; an event naming a document's file makes it look at the
+  disk (`checkDisk`), as focusing its window does. A rename within the
+  folder is followed.
+- *Closing and quitting* never nest an event loop: `OnClose` of a
+  document's window prevents a close that must save or ask, does it on a
+  goroutine (dialogs are sheets on macOS), then destroys the window. The
+  quit's `OnBeforeQuit` listener prevents a quit with edited documents,
+  saves them in place, writes their recovery copies or asks, then calls
+  `App.Quit` again (`docQuit.resolved` lets that one through), and
+  windows closing during a quit no longer ask.
+- *Launch.* `whenLaunched` runs once the launch arguments were delivered:
+  the kinds restore their recovery copies, the files queued by
+  `OnOpenFile` open, and then, with no document open, an untitled one.
+- *Menus.* The document roles go to `documentRole` before the window
+  roles; `refreshDocumentMenus` enables them for the focused window's
+  document when focus or a document's state changes, and
+  `updateRecentMenus` rebuilds the Open Recent submenus from
+  `recent-documents.json`.
 
 ## Native UI (`ui`)
 
@@ -1862,7 +1959,11 @@ either.
   rows are measured, and the others are estimated as their average; the
   content's size, and its offset, are where those heights put the rows,
   in float64, as all scroll offsets are, so that millions of rows scroll
-  by fractions of a DIP. Rows are placed relative to the list, the offset
+  by fractions of a DIP. Following its end with a `FollowAnimation`, a
+  list notes where the top of its last row was placed; as rows grow or
+  come, that row goes up, and the rows show as far below their place,
+  which a motion channel takes back to nothing (`glideToEnd`), counted
+  as at the end. Rows are placed relative to the list, the offset
   they were placed at kept as `scrollBase` for placing and revealing. An
   offset the wheel, the keys, the scroll bar or the app changed moves the
   place by as much when it is a step (up to two views), so rows not
@@ -2067,6 +2168,77 @@ either.
     the editor reads back after the build, as a query typed. Separators
     are built by the diff view across both sides, over the room their
     blocks leave.
+- **Markdown** (`ui/markdown`), on ui's public API as `ui/editor` is, whose
+  tokenizers highlight its code. The parser, `ui/markdown/parser`,
+  imports nothing of ui, so that `ui/richtext` reads Markdown without the
+  view; the view reaches it through its exported methods only
+  (`Source`, `Footnote`, `Block.Revision` and `Healed`). It follows cmark-gfm's two
+  phases over flat blocks and inlines with byte offsets: a block parser
+  with a stack of open blocks, line by line, closing those a line does not
+  match before adding a block, so that blocks go in document order; and
+  inlines parsed per block when first asked, with cmark's guards against
+  quadratic inputs (the bottoms of openers, backtick runs, comments and
+  math remembered unclosed). Appending text truncates the blocks from the
+  outermost block open after the last complete line (`restart`), which
+  CommonMark makes sound: no rule looks ahead, and those rewriting an
+  earlier block touch only open ones; the partial last line never decides
+  what is closed. Definitions made or unmade parse anew the inlines of the
+  blocks that looked their labels up, and the inlines of blocks parsed
+  again are reused when their text is the same. An edit parses from the
+  top-level block before it until a top-level block starts with nothing
+  open (`quiet`) where one did, and splices the old ones after, shifted.
+  Streaming completes the tail's inlines from the openers the parser left
+  (`heal.go`) and holds back lines that may still change. The view keeps
+  the document in its root's local state and the spans of each paragraph
+  by block, links as inline `Link` elements, a code block's tokens by line
+  and its text in chunks of 32 lines; it reveals text at a pace, fading it
+  by span colors and element opacity, which only paint. A `Selectable`
+  root's `CopyData` and `SelectedTexts` map paragraphs' runes back to
+  source offsets, to copy text with block separators, Markdown, and the
+  HTML of that Markdown parsed again, which `ui/richtext` pastes with its
+  formatting, as it reads Markdown with the same parser
+  (`ParseMarkdown`). Links open in the system only when `ui.SafeToOpen`
+  allows them, in both.
+- **Rich text** (`ui/richtext`). Package `richtext` edits attributed text
+  on ui's public API, as `ui/editor` does: a focusable box with a text
+  input client, `HandleInput`, `Draw`, `Access` and its own scrolling, and
+  four hooks of ui for it: `ShapeRichTextWith` aligns a paragraph's lines,
+  `Element.SetChanged` reports its edits as `Changed`,
+  `Services.ReadClipboardData` and `WriteClipboardData` carry its formats,
+  and `InputSelect` takes a selection assistive technology made.
+  - *The text* (`text.go`, `seq.go`). A `Text` is a value: its characters
+    in an `internal/rope` tree, and beside it a persistent sequence of its
+    paragraphs (an AVL tree of chunks of 32, `seq`), each with an
+    identity, a style and its runs: attributes over its runes and, last,
+    its newline's, which an empty paragraph types in, as Word's paragraph
+    mark. Runs are kept maximal. An edit splits and joins both trees,
+    copying the chunks and paths it touches; paragraphs joined or split
+    take the style of the one their first rune comes from, as AppKit's
+    `fixParagraphStyleAttributeInRange:`. Lists are flat, an indent per
+    item, as Quill and Automerge keep them, which leaves room for a CRDT.
+  - *The document* (`document.go`, `commands.go`). A `Document` holds a
+    text, the selection, the typing attributes, and the steps of undo as
+    the texts before and after each, which share all they did not change,
+    with the region each changed and the selections. A log of changed
+    regions by version lets the editor lay out again only the paragraphs a
+    change of the app touched. Typing derives the typing attributes as
+    NSTextView does (the character before the caret, the one after at a
+    paragraph's start, links, code and tags only inside), measured by a
+    Swift probe of NSTextView.
+  - *The editor* (`view.go`, `edit.go`, `input.go`, `ime.go`, `paint.go`).
+    It lays out a paragraph at a time with `ShapeRichTextWith`, keeping
+    each layout for the runs, style and composition it was made of, and
+    places them by heights in two Fenwick trees from an anchor paragraph,
+    as a text area does. Every edit goes through the document, as a step
+    of undo or part of the action's; typing joins typing's step.
+    Attachments are inline objects of the text system.
+  - *Formats out of the process.* The clipboard carries the editor's JSON,
+    HTML (`golang.org/x/net/html` reads what is pasted) and plain text;
+    browsers carry each text format through the clipboard events. The
+    runs' formats go to assistive technology as `AccessNode.TextRuns`:
+    `AXAttributedStringForRange` on macOS, ATK's run attributes on Linux,
+    and UI Automation's Text pattern on Windows (`uia_text.go`), whose
+    ranges are COM objects of their own.
 - **Text selection** (`ui/textselection.go`). `Selectable` on a text
   selects that paragraph; on a container it gives its text descendants
   one selection. The window keeps endpoints as stable element IDs and
@@ -2078,7 +2250,10 @@ either.
   controls and `Unselectable` subtrees do not participate. A drag near
   a scroll edge asks for frames until scrolling stops. Inline children
   contribute to their paragraph once, and preparation waits for their
-  final text so a rebuild preserves the selection.
+  final text so a rebuild preserves the selection. A paragraph whose text
+  only grew at its end keeps the selection, as a reply streaming in. A
+  container's `CopyData` makes what Copy writes from the parts
+  `SelectedTexts` returns: each paragraph's ID, text and runes selected.
 - **Tables** (`ui/table.go`, `ui/editable.go`). A table's rows are a
   `List`'s that scrolls both ways: the list lays its rows out at least as
   wide as the columns ask (`rowMinW`), and the header, outside the list,
@@ -2503,6 +2678,15 @@ either.
   the attributes of each font, and calls the functions of each layout
   through `SyscallN` rather than reflection. Colors, underlines and
   strikethroughs of spans only paint, by the rune each glyph starts.
+  A span with an `ObjectWidth` makes its object replacement characters
+  inline objects: boxes standing on the baseline, which lines break
+  around and which draw no glyph (`Glyph.Object`), as a rich text's
+  images. The line takes their height in the shared layout; each engine
+  only gives them their width: Core Text through run delegates, whose
+  callbacks return floats Go cannot, so they are leaves in assembly
+  (`rundelegate_darwin_*.s`); DirectWrite through `IDWriteInlineObject`s,
+  their places found by hit testing, as its glyph runs' are; Pango through
+  shape attributes; the canvas engine as clusters of their width.
   Text elements built inside a text (`ui/inline.go`) are inline: the
   paragraph takes their text when its `Children` returns, and their
   styles as spans over its own when it lays out. At commit, each gets the
@@ -3020,7 +3204,7 @@ shader generation commands are listed in [AGENTS.md](../AGENTS.md).
 
 | suite | command | covers |
 |---|---|---|
-| core | `go test .` | lifecycle, quit, IPC, channels, events, Eval, protocol, frontend URLs and serving, menus, trust, single instance, dev ready signal (fake backend); `go test -run '^$' -bench .` measures the Go side of IPC and custom schemes |
+| core | `go test .` | lifecycle, quit, documents, IPC, channels, events, Eval, protocol, frontend URLs and serving, menus, trust, single instance, dev ready signal (fake backend); `go test -run '^$' -bench .` measures the Go side of IPC and custom schemes |
 | generator | `go test ./internal/tsgen` | TS output, json/v2 rules, source lookup; type-checks the output with `tsc` when `bun install` was run |
 | CLI | `go test ./cmd/mygo` | config, Info.plist, icons, universal binaries, template, dev launch/ready/stop (the test binary plays the app), watcher and `go list` inputs, the console's output (replayed as a terminal shows it), resources (platform directories, universal pairs, staging, conflicts, dev placement; builds for every OS), frontend embedding (compiles an app with the overlay), `.DS_Store` against a dmgbuild golden file, a real DMG (`hdiutil`); builds and tools are skipped with `-short` |
 | runtime | `bun run test` | the injected runtime, `mygo-runtime` and the plugins' packages (against a fake Go side on the real runtime, `plugins/fake-go.ts`) |
@@ -3228,6 +3412,8 @@ which npm allows only for packages that exist: the first release uses an
 | traffic lights, Dock | yes | ignored | ignored |
 | hidden title bar | AppKit's traffic lights over a full-size content view | GTK's title buttons in header bars over the page, per `gtk-decoration-layout`; none where the Wayland compositor decorates windows | caption buttons drawn in a layered child window, through DirectComposition over a material; snap layouts; a top edge that resizes |
 | progress bar | Dock tile content view (NSBoxes: NSProgressIndicator does not draw there), app-wide | Unity launcher API over D-Bus (`com.canonical.Unity.LauncherEntry`), app-wide | `ITaskbarList3`, per window |
+| file icons | `NSWorkspace iconForFile:` drawn into an sRGB `NSBitmapImageRep` at the size | GIO's `standard::icon`, or a desktop entry's `GAppInfo` icon, through `gtk_icon_theme_lookup_by_gicon` | `IShellItemImageFactory::GetImage` (`SIIGBF_ICONONLY`), a DIB with straight alpha |
+| installed apps | `.app` bundles of the Applications folders, `NSFileManager displayNameAtPath:` and `NSBundle`, off the main thread; launched with `openURL:` | `g_app_info_get_all` filtered by `g_app_info_should_show`; launched with `g_app_info_launch` and GDK's launch context | `FOLDERID_AppsFolder` enumerated in an STA of its own; launched with `ShellExecute` of `shell:AppsFolder\<ID>` |
 | badge count | Dock tile label | Unity launcher API count | not shown |
 | skip taskbar | ignored | skip-taskbar hint | `ITaskbarList::DeleteTab` (the window style is untouched) |
 | FlashFrame | informational Dock bounce | urgency hint | `FlashWindowEx` until focused |
@@ -3235,9 +3421,12 @@ which npm allows only for packages that exist: the first release uses an
 | window icon | ignored | `gtk_window_set_icon` | `WM_SETICON` at the window's DPI |
 | URL schemes | Info.plist (`urlSchemes`); `RegisterURLScheme` makes the app the default handler | desktop entry + `mimeapps.list` | `HKCU\Software\Classes` |
 | downloads | `shouldPerformDownload`, non-displayable or attachment responses → `WKDownload` delegate | `download-started` / `decide-destination` on the web context; response policy for attachments | `DownloadStarting` (`ICoreWebView2_4`), replacing WebView2's download UI |
+| Cookies | the default `WKWebsiteDataStore`'s `WKHTTPCookieStore` | the default web context's `WebKitCookieManager` (2.42+, kept in memory); libsoup 3 or 2.4 to match WebKitGTK 4.1 or 4.0 | `ICoreWebView2CookieManager` (`ICoreWebView2_2`) of a window's web view; `put_Expires` called with `comCallFloat` |
 | ClearBrowsingData | default `WKWebsiteDataStore`, all types | the web context's website data manager | the WebView2 profile's `ClearBrowsingDataAll` (needs a window) |
 | permissions | `WKUIDelegate` media capture (camera, microphone) | `permission-request` (camera, microphone, geolocation, notifications) | `PermissionRequested` (the same four; WebView2 asks about others) |
 | file associations | `CFBundleDocumentTypes`; files arrive with `application:openURLs:` | desktop entry `MimeType` (`%U`), a shared-mime-info package in the .deb for types the app defines | ProgIDs and `OpenWithProgids` written by the installer |
+| document windows | `representedURL` (proxy icon, Command-click folder menu) and `setDocumentEdited:` (the dot), then the traffic lights are laid out again | the core puts `*` before the title | the core puts `*` before the title |
+| replacing a document's file | `-[NSFileManager replaceItemAtURL:withItemAtURL:…]` (permissions, dates, extended attributes, ACLs, identity) | rename after `chmod` and `lchown` to the target's | `ReplaceFileW`, retried on sharing violations |
 | recent documents | `noteNewRecentDocumentURL:` / `clearRecentDocuments:` of the shared `NSDocumentController` (the Dock menu) | `gtk_recent_manager_add_item`, removing the items of `g_get_application_name()` | `SHAddToRecentDocs` (`SHARD_PATHW`), `IApplicationDestinations::RemoveAllDestinations`; the process keeps the AppUserModelID the shell derives from its path, which the installer's shortcuts have too |
 | jump list tasks | ignored | ignored | `ICustomDestinationList`: the Recent category, `AddUserTasks` with an `IShellLinkW` per task (`PKEY_Title`), `CommitList` |
 | Dock menu | `applicationDockMenu:` | ignored | ignored |
@@ -3249,6 +3438,7 @@ which npm allows only for packages that exist: the first release uses an
 | window position | honored | ignored by Wayland compositors | honored |
 | resize borders without a title bar | the window's own | the outer 5 px of the page | invisible, outside the window; along the top of a hidden title bar, a child window |
 | content protection, click-through | yes | ignored | yes |
+| panels | `NSPanel` with the nonactivating style, floating, on all Spaces as a full-screen auxiliary | sticky utility window, kept above, out of the taskbar and the pager; a gtk-layer-shell overlay surface on Wayland where it can be | topmost `WS_EX_TOOLWINDOW` owned by the hidden application window, rounded |
 | flyouts | borderless nonactivating `NSPanel` child window, or an `NSPopover`; placed in the visible frame | `GTK_WINDOW_POPUP` (override-redirect, placed in the work area, on X11; `xdg_popup` with `gdk_window_move_to_rect` on Wayland); focusable ones grab the seat | owned `WS_POPUP` + `WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE` unless focusable, `CS_DROPSHADOW` for a shadow, with corners rounded by DWM on Windows 11 |
 | custom scheme origin | `<scheme>://localhost` | `<scheme>://localhost` | `http://<scheme>.localhost` (the page's `location`) |
 | `LoadHTML` documents | a reload loads the base URL (`about:blank` without one), so the core cancels it (`Navigation.Reload`) and loads the HTML again; not in the history | as macOS | as macOS, but in the history: going back to one with a base URL loads that URL |
