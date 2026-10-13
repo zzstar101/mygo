@@ -58,6 +58,7 @@ framework safely. Read it before changing anything under `internal/`.
 ├── frontend.go         the app's frontend: relative URLs, devUrl, mygo://localhost
 ├── menu.go             Menu/MenuItem model, roles, native item updates
 ├── dialog.go modules.go clipboard.go: shell, clipboard, screen, theme, tray, shortcuts, notifications
+├── watch.go watch_scan.go: WatchFiles, and what a watch saw of its directory
 ├── loop.go             main-thread queue: postMain / onMain / await
 ├── events.go           listener lists and the Preventable event types
 ├── single_instance.go  RequestSingleInstanceLock over a Unix socket
@@ -71,6 +72,7 @@ framework safely. Read it before changing anything under `internal/`.
 │   ├── web/            browsers (js/wasm): native UI on canvases, through syscall/js
 │   ├── unsupported/    stub for other platforms
 │   ├── fake/           in-memory backend for unit tests
+│   ├── watchdriver/    the goroutine that runs a backend's file watcher
 │   ├── bridge/         embeds bridge.js, built from packages/bridge
 │   ├── surface/        the connection between a window and its native UI
 │   ├── scene/          display lists and glyph atlases, what renderers draw
@@ -96,8 +98,8 @@ framework safely. Read it before changing anything under `internal/`.
 │                       per-platform binary packages
 ├── plugins/            official plugins, each a Go package and its npm
 │                       package (@mygo-plugins/<name>) side by side: fetch,
-│                       websocket, sqlite; and Go only: updater, the update window,
-│                       a web page or native UI (updater/native),
+│                       websocket, sqlite, watch; and Go only: updater, the
+│                       update window, a web page or native UI (updater/native),
 │                       terminal, a view of native UI running programs with
 │                       libghostty-vt, glass, and game, what games need
 │                       beyond what apps do (game/gamepad)
@@ -192,6 +194,10 @@ rules are:
 Main-thread-only fields are marked as such in comments (for example
 `Window.native`, `Window.trusted`). Fields shared with other goroutines are
 guarded by a mutex or atomic.
+
+File watches (`watch.go`) don't use the main thread: each runs on a
+goroutine of its own, and the backend's watcher on another (see
+[Watching files](#watching-files-watchgo)).
 
 ## Native interop without cgo
 
@@ -916,6 +922,12 @@ build` like mygo-runtime and released with the same version.
   Connections belong to their page and close on navigation or app quit.
   `mygo-plugin.json` names the six native-library assets, which the CLI
   bundles like libghostty-vt, with checksums for the library assets. Go and native UI apps can also open connections directly.
+- **watch** gives pages `mygo.WatchFiles` watches of the directories the
+  app names, by their names. `Watch` streams the events through a channel
+  for as long as the watch lasts. A page's watches count against its quota
+  by the `Done` channel of its page context, which ipc.go gives plugins in
+  the call's context (`internal/callcontext`), as navigating starts a new
+  one; they stop with the page context.
 
 - **terminal** is a terminal for native UI: a `Terminal` runs a program in
   a pseudo-terminal and emulates it with libghostty-vt, Ghostty's terminal
@@ -1397,6 +1409,53 @@ clock and fails after two seconds, so the output tries the device again;
 `audio.Err` reports the failure. Formats register a magic prefix and a
 constructor as `image` does: WAV is built in, `audio/vorbis` and
 `audio/mp3` wrap pure Go decoders.
+
+## Watching files (`watch.go`)
+
+`WatchFiles` keeps what it saw of its directory (`watch_scan.go`): the
+`os.FileInfo` of every file and directory, by path, read through an
+`os.Root` so that a path can't lead out of it, and symlinks not followed.
+The backend's watcher (`platform.FileWatch`) is given targets, the entries
+the core enrolls, and reports notices: a target, or a child of a directory
+target by name, changed. A notice says where to look, not what happened:
+after the debounce, the core lists again the directories that notices
+named and stats the files, and the events are the differences between what
+it sees and what it saw (`fileWatchDiff`). An entry whose identity
+(`os.SameFile`) moved is a rename, unless a hard link makes it ambiguous,
+and what moved with a directory renamed above it says nothing more. When
+the system lost changes (an inotify queue overflow, Windows'
+`ERROR_NOTIFY_ENUM_DIR`), the core lists every directory again rather than
+stopping. Enrolling is checked against the scan: the backend opens a target
+and compares its identity with what the scan saw, then the scan stats it
+again, so that an entry replaced in between (an editor's atomic save) is
+looked at again rather than watched in place of the other.
+
+The watch's goroutine is the only user of its scan and of its backend's
+watcher, whose methods `internal/watchdriver` runs on a goroutine of its
+own: it adds and removes targets between waits for the system, which
+`Wake` interrupts, and calls the core's `notice` with what the system
+reports; `notice` hands it to the watch's goroutine over a channel, and a
+full channel makes the watch look at everything again. Neither uses the
+main thread, so watches work before the app runs and don't wait on it.
+
+- macOS: kqueue `EVFILT_VNODE` on a descriptor opened `O_EVTONLY` for every
+  file and directory, since a directory tells that its entries changed but
+  not which, and a file's writes only reach its own descriptor.
+- Linux: an inotify instance per watch with a watch per directory, which
+  names the child that changed. The same directory added twice shares a
+  watch descriptor, and a removed descriptor's events still queued before
+  its `IN_IGNORED` must not be taken for a new one's, so the backend keeps
+  generations of targets per descriptor.
+- Windows: `ReadDirectoryChangesW` on overlapped handles, completing on a
+  completion port per watch. Windows refuses to rename a directory while a
+  handle is open on something beneath it, so a recursive watch is one
+  `Subtree` target on its directory, which reports paths; other backends
+  return `ErrUnsupported` for `Subtree` and get every directory. The
+  directory's own handle says nothing when it is renamed, so the core also
+  watches its parent and looks at the directory when the parent names it.
+  The handles can't be given to the os package, which would tie them to the
+  Go runtime's completion port. A handle closed still completes its I/O,
+  which writes to its buffer, so a session lives until its completion.
 
 ## Native UI (`ui`)
 
@@ -2023,15 +2082,16 @@ either.
   the pointer went a few DIPs, past a neighbor whose middle it passes; a
   double click on a header's edge fits the column as the table lays
   out, from the intrinsic widths of the cells the frame built
-  (`tableFit`). Sorting is the app's: the table sets `ListState.Sort`
-  and shows it, to assistive technology as well (`AccessSortAscending`
-  and `AccessSortDescending`: AppKit's `AXSortDirection`, ATK's `sort`
-  attribute, UIA's ItemStatus). An `EditableText` in a row reads the row
-  being built (`Context.row`): the list, which keeps the focus, asks for
-  the chosen row's text to be edited on Return (macOS) or F2, which it
-  takes only once a row has such a text; a click on the text of a row
-  chosen before the click edits it once the double-click time has
-  passed.
+  (`tableFit`). Sorting is the app's: the table sets `ListState.Sort`,
+  or `SortBy` for several columns (a new slice each time, which
+  `sortClicked` makes), and shows it, to assistive technology as well
+  (`AccessSortAscending` and `AccessSortDescending`: AppKit's
+  `AXSortDirection`, ATK's `sort` attribute, UIA's ItemStatus). An
+  `EditableText` in a row reads the row being built (`Context.row`): the
+  list, which keeps the focus, asks for the chosen row's text to be
+  edited on Return (macOS) or F2, which it takes only once a row has such
+  a text; a click on the text of a row chosen before the click edits it
+  once the double-click time has passed.
 - **Outlines** (`ui/outline.go`). An outline flattens the open part of
   its tree into rows every frame (`OutlineState.flatten`), which a `List`
   or a `Table` builds as they show, keyed by their items. Rows are tree
@@ -3149,6 +3209,7 @@ which npm allows only for packages that exist: the first release uses an
 
 | feature | macOS | Linux | Windows |
 |---|---|---|---|
+| watching files | kqueue, a descriptor per file and directory | inotify, per directory | `ReadDirectoryChangesW`, one for a recursive tree, and the parent to see the directory renamed |
 | menu bar | application menu bar, default menu installed | per-window GTK menu bar, none by default | per-window Win32 menu bar, none by default |
 | auto-hide menu bar | ignored | the bar widget hides; `can-activate-accel` keeps its shortcuts; Alt alone or F10 show it and open its first menu until it deactivates | the menu is attached only for the `SC_KEYMENU` menu loop that Alt alone or F10 start; shortcuts come from the webview |
 | tray | NSStatusItem, click events | AppIndicator (menu only, no click events) | notification area icon, click events |

@@ -206,6 +206,7 @@ func (a *Application) prepareQuit() bool {
 // finish runs once after the event loop has stopped.
 func (a *Application) finish() {
 	a.finished.Do(func() {
+		stopFileWatches()
 		clipboardStopped = true
 		backend().Clipboard().Close()
 		saveWindowStates()

@@ -51,6 +51,12 @@ type Backend struct {
 	// WatchingNetwork whether Network.Watch was called.
 	Online, Constrained bool
 	WatchingNetwork     bool
+	// FileWatches are the file watches made, FileWatchError what making
+	// one fails with, and FileWatchSubtree whether they take Subtree
+	// targets.
+	FileWatches      []*FileWatch
+	FileWatchError   error
+	FileWatchSubtree bool
 	// URLSchemes are the registered URL schemes, by scheme: "id name".
 	URLSchemes map[string]string
 	// LoginItem is the command that starts the app at login: "id name arg".

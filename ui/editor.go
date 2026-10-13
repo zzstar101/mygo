@@ -66,8 +66,10 @@ type editor struct {
 	// wrapped text between them; zero for the paragraphs, at least three.
 	lines       [2]int
 	placeholder string
-	// ranges style runs of the text (TextRanges), sorted by Start.
+	// ranges style runs of the text (TextRanges): as given until apart is
+	// set, then sorted by Start and apart (sortRanges).
 	ranges []TextRange
+	apart  bool
 	// layout is what the last frame laid out of a single-line input or a
 	// selectable text; area lays out a text area (textarea.go).
 	layout           *text.Layout
