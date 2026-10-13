@@ -349,6 +349,9 @@ func newRuntime(view func(*context), h host) *engine {
 	if frameStatsOn {
 		rt.stats = newFrameStats(frameStatsThreshold)
 	}
+	enginesMu.Lock()
+	liveEngines[rt] = struct{}{}
+	enginesMu.Unlock()
 	return rt
 }
 
@@ -731,6 +734,27 @@ func (rt *engine) changed() {
 	rt.host.requestFrame()
 }
 
+// liveEngines are the engines of the windows shown, for what reaches every
+// window at once, as UseTexts. Guarded by enginesMu.
+var (
+	enginesMu   sync.Mutex
+	liveEngines = map[*engine]struct{}{}
+)
+
+// textsChanged asks the user interface of every window shown to build its
+// frame anew, with the texts UseTexts set. Safe from any goroutine.
+func textsChanged() {
+	enginesMu.Lock()
+	engines := make([]*engine, 0, len(liveEngines))
+	for rt := range liveEngines {
+		engines = append(engines, rt)
+	}
+	enginesMu.Unlock()
+	for _, rt := range engines {
+		rt.host.post(func() { rt.changed() })
+	}
+}
+
 // scheduleAt asks for a frame at t (After).
 func (rt *engine) scheduleAt(t time.Time) {
 	rt.wakeMu.Lock()
@@ -763,6 +787,9 @@ func (rt *engine) armTimer() {
 // frame ends: the rest of the view builds with a Context that still works,
 // and reads the theme, the size and its state as before.
 func (rt *engine) close() {
+	enginesMu.Lock()
+	delete(liveEngines, rt)
+	enginesMu.Unlock()
 	if rt.inFrame {
 		rt.closing = true
 		return

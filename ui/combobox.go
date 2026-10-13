@@ -415,12 +415,13 @@ func coreAutocomplete(c *context, value *string, suggestions []string) *node {
 //	}
 func coreSearchField(c *context, query *string) *node {
 	t := c.theme
+	tx := textsFor(c.rt.locale())
 	f, in := field(c, func() *node {
 		magnifier(c)
-		in := coreTextInputBase(c, query).Grow(1).MinWidth(t.Space(15)).Placeholder("Search")
+		in := coreTextInputBase(c, query).Grow(1).MinWidth(t.Space(15)).Placeholder(tx.Search)
 		in.search = true
 		if *query != "" {
-			clear := coreButtonBase(c).Size(t.Space(4), t.Space(4)).Radius(t.Space(2)).Background(t.TextMuted.Alpha(0.5)).Label("Clear")
+			clear := coreButtonBase(c).Size(t.Space(4), t.Space(4)).Radius(t.Space(2)).Background(t.TextMuted.Alpha(0.5)).Label(tx.Clear)
 			clear.flags &^= flagFocusable // as AppKit's: no stop of Tab
 			clear.flags |= flagKeepFocus
 			clear.role = RoleButton
@@ -477,6 +478,7 @@ func magnifier(c *context) *node {
 //	ui.TokenField(c, &app.tags, allTags).Label("Tags")
 func coreTokenField(c *context, tokens *[]string, suggestions []string) *node {
 	t := c.theme
+	tx := textsFor(c.rt.locale())
 	var p *comboboxParts
 	var query *string
 	changed := false
@@ -494,7 +496,7 @@ func coreTokenField(c *context, tokens *[]string, suggestions []string) *node {
 				Radius(t.Radius).Background(t.SurfacePressed).Shrink(0)
 			chip.Children(func() {
 				coreText(c, tok).SingleLine()
-				x := coreButtonBase(c).Size(t.Space(3.5), t.Space(3.5)).Radius(t.Space(1)).Label("Remove " + tok)
+				x := coreButtonBase(c).Size(t.Space(3.5), t.Space(3.5)).Radius(t.Space(1)).Label(tx.RemoveToken(tok))
 				x.flags &^= flagFocusable
 				x.flags |= flagKeepFocus
 				x.role = RoleButton

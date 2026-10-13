@@ -97,6 +97,7 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 	tx := textsFor(c.rt.locale())
 	cur := *cursor
 	month := time.Date(cur.Year(), cur.Month(), 1, 0, 0, 0, 0, time.UTC)
+	first := tx.firstWeekday()
 	grid := coreColumn(c).Gap(t.Space(0.5)).Focusable().Shrink(0).Role(RoleTable).Label(tx.MonthYear(month.Year(), month.Month()))
 	grid.flags |= flagOwnRing
 	move := func(d time.Time) {
@@ -150,12 +151,12 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 		})
 		coreRow(c).Children(func() {
 			for i := range 7 {
-				d := tx.Weekdays[(int(tx.FirstWeekday)+i)%7]
+				d := tx.Weekdays[(int(first)+i)%7]
 				coreText(c, d).Width(t.Space(8)).TextAlign(Center).FontSize(t.FontSize - 2).TextColor(t.TextMuted).Role(RoleColumnHeader)
 			}
 		})
 		// Six weeks from the first day of the week on or before the first.
-		start := month.AddDate(0, 0, -((int(month.Weekday()) - int(tx.FirstWeekday) + 7) % 7))
+		start := month.AddDate(0, 0, -((int(month.Weekday()) - int(first) + 7) % 7))
 		today := c.now
 		for w := range 6 {
 			coreRow(c).Role(RoleRow).Children(func() {

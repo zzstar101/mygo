@@ -54,6 +54,7 @@ var inspIcons = sync.OnceValue(func() (icons struct{ pick, close, warn, arrow *S
 // window w×h.
 func (rt *engine) buildInspector(c *context, appW, w, h float32) {
 	in := &rt.insp
+	tx := textsFor(c.rt.locale())
 	in.shown, in.changed = in.sum, false
 	if in.opened == nil {
 		in.opened = map[uint64]bool{}
@@ -83,7 +84,7 @@ func (rt *engine) buildInspector(c *context, appW, w, h float32) {
 	panel := coreColumn(c).Key(inspectorKey)
 	in.panel = panel.id
 	panel.Absolute().Left(appW).Top(0).Width(w-appW).Height(h).Background(pal.bg).
-		BorderWidth(0, 0, 0, 1).BorderColor(pal.border).FontSize(12).TextColor(pal.text).Label("Developer tools")
+		BorderWidth(0, 0, 0, 1).BorderColor(pal.border).FontSize(12).TextColor(pal.text).Label(tx.DeveloperTools)
 	panel.Children(func() {
 		in.resizer(c)
 		in.toolbar(c, rt)
@@ -229,6 +230,7 @@ func (in *inspector) treeRows() {
 
 // tree builds the tree of elements as markup, Chrome's Elements panel.
 func (in *inspector) tree(c *context, rt *engine) {
+	tx := textsFor(c.rt.locale())
 	in.treeRows()
 	if in.reveal && in.selected != 0 {
 		in.reveal = false
@@ -264,7 +266,7 @@ func (in *inspector) tree(c *context, rt *engine) {
 			row.Opacity(0.5)
 		}
 		row.Children(func() { in.treeRow(c, r, n) })
-	}).Grow(1).MinHeight(0).PaddingY(2).FocusRing(false).Label("Elements")
+	}).Grow(1).MinHeight(0).PaddingY(2).FocusRing(false).Label(tx.Elements)
 	in.listID = list.id
 	list.afterInput(func() {
 		if list.Changed() && in.row >= 0 && in.row < len(in.rows) {

@@ -432,10 +432,15 @@ func (h *windowHost) startDataDrag(data transfer.Data, local any, options transf
 func (h *windowHost) cancelDataDrag()                    { h.conn.CancelDataDrag() }
 func (h *windowHost) setDropFormats(f []transfer.Format) { h.conn.Surface.SetDropFormats(f) }
 
+// post runs fn on the main thread, before the next frame. A window whose
+// surface asks for frames neither way, as a test's own host, has nowhere to
+// run it: what it changed waits for the frame that comes next.
 func (h *windowHost) post(fn func()) {
-	if h.conn.Post != nil {
+	switch {
+	case h.conn == nil:
+	case h.conn.Post != nil:
 		h.conn.Post(fn)
-	} else {
+	case h.conn.Invalidate != nil:
 		h.conn.Invalidate()
 	}
 }

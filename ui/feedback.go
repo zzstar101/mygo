@@ -225,6 +225,7 @@ func coreAlertDialog(c *context, open *bool, title, message string, buttons ...s
 // nothing.
 func coreFindBar(c *context, open *bool, query *string, matches int, current *int) *node {
 	t := c.theme
+	tx := textsFor(c.rt.locale())
 	if !*open {
 		// Nothing, which Changed and the rest can ask.
 		e := coreBox(c).Absolute()
@@ -233,7 +234,7 @@ func coreFindBar(c *context, open *bool, query *string, matches int, current *in
 	}
 	// Keyed, for its state to go as it closes, to open anew.
 	bar := coreRow(c).Key("find bar").Gap(t.Space(2)).Padding(t.Space(1.5), t.Space(3)).AlignItems(Center).Background(t.Surface).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Shrink(0).Role(RoleToolbar).Label("Find")
+		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Shrink(0).Role(RoleToolbar).Label(tx.Find)
 	bar.widget = "FindBar"
 	// Its state goes as it closes: true in the frame it opens.
 	opening := coreLocal(bar, "opening", func() bool { return true })
@@ -258,11 +259,11 @@ func coreFindBar(c *context, open *bool, query *string, matches int, current *in
 	bar.Children(func() {
 		f, in := field(c, func() *node {
 			magnifier(c)
-			in := coreTextInputBase(c, query).Grow(1).MinWidth(t.Space(25)).Placeholder("Find")
+			in := coreTextInputBase(c, query).Grow(1).MinWidth(t.Space(25)).Placeholder(tx.Find)
 			in.search = true
 			return in
 		})
-		f.Label("Find").Grow(1).MaxWidth(t.Space(90))
+		f.Label(tx.Find).Grow(1).MaxWidth(t.Space(90))
 		if *opening {
 			// Opening the bar focuses its field, with what was found before
 			// chosen, ready to type over.

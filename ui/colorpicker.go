@@ -97,6 +97,7 @@ var swatches = []struct {
 // color.
 func coreColorPicker(c *context, color *Color) *node {
 	t := c.theme
+	tx := textsFor(c.rt.locale())
 	panel := coreColumn(c).Gap(t.Space(2.5)).Width(t.Space(60)).Shrink(0)
 	panel.widget = "ColorPicker"
 	st := coreLocal(panel, "picker", func() pickerState {
@@ -119,7 +120,7 @@ func coreColorPicker(c *context, color *Color) *node {
 	x := st.hsv
 	panel.Children(func() {
 		// The square of saturation and brightness.
-		sq := coreBox(c).Height(t.Space(40)).Radius(t.Radius).Focusable().FocusRing(false).Role(RoleSlider).Label("Saturation and brightness")
+		sq := coreBox(c).Height(t.Space(40)).Radius(t.Radius).Focusable().FocusRing(false).Role(RoleSlider).Label(tx.Saturation)
 		sq.flags |= flagDraggable | flagHover | flagOwnRing
 		sq.Cursor(CursorCrosshair)
 		sq.afterInput(func() {
@@ -188,7 +189,7 @@ func coreColorPicker(c *context, color *Color) *node {
 				checkers(p, r, t.Space(1.5))
 				p.Fill(r, now, 0)
 			})
-			in := coreTextInput(c, &st.hex).Label("Hex").Grow(1).FontFeatures("tnum")
+			in := coreTextInput(c, &st.hex).Label(tx.Hex).Grow(1).FontFeatures("tnum")
 			in.afterInput(func() {
 				if v, err := parseHex(st.hex); err == nil && in.Changed() {
 					hex := st.hex

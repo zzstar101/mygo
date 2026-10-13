@@ -493,14 +493,15 @@ func (rt *engine) editCommands(s *state) []editItem {
 	if s.textScope != 0 && rt.selection.scope == s.textScope {
 		_, _, selected = rt.textSelectionBounds()
 	}
+	tx := textsFor(rt.locale())
 	type command = editItem
 	var (
-		undo      = command{"Undo", "undo", len(ed.undo) > 0}
-		cut       = command{"Cut", "cut", selected && !ed.password}
-		copyText  = command{"Copy", "copy", selected && !ed.password}
-		paste     = command{"Paste", "paste", true}
-		del       = command{"Delete", "delete", selected}
-		selectAll = command{"Select All", "selectAll", ed.buf.n > 0}
+		undo      = command{tx.Undo, "undo", len(ed.undo) > 0}
+		cut       = command{tx.Cut, "cut", selected && !ed.password}
+		copyText  = command{tx.Copy, "copy", selected && !ed.password}
+		paste     = command{tx.Paste, "paste", true}
+		del       = command{tx.Delete, "delete", selected}
+		selectAll = command{tx.SelectAll, "selectAll", ed.buf.n > 0}
 		separator = command{}
 		commands  []command
 	)

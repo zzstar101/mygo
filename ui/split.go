@@ -17,6 +17,7 @@ func coreSplitVertical(c *context, size *float32, first, second func()) *node {
 
 func split(c *context, size *float32, first, second func(), vertical bool) *node {
 	t := c.theme
+	tx := textsFor(c.rt.locale())
 	minPane, grip := t.Space(10), t.Space(1.5)
 	// One element or the other: creating one adds it to the parent.
 	var e *node
@@ -63,7 +64,7 @@ func split(c *context, size *float32, first, second func(), vertical bool) *node
 			a.Children(first)
 
 			// The line takes the focus between the panes, in their order.
-			div := coreBox(c).Shrink(0).Focusable().Role(RoleSplitter).Label("Divider")
+			div := coreBox(c).Shrink(0).Focusable().Role(RoleSplitter).Label(tx.Divider)
 			div.widget = "Divider"
 			div.flags |= flagOwnRing
 			if vertical {
