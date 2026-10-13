@@ -53,8 +53,9 @@ type TimelineOptions struct {
 	// Delay holds the timeline at its first value for a while before it
 	// plays, and RepeatDelay the value it got to between plays.
 	Delay, RepeatDelay time.Duration
-	// Paused holds the playhead where it is, and Reverse plays it
-	// backward, to its start.
+	// Paused holds the playhead where it is, so that the time a paused
+	// timeline spends is not time it played and it goes on from where it
+	// held when it is not paused; Reverse plays it backward, to its start.
 	Paused  bool
 	Reverse bool
 	// Seek holds the playhead at a time of the timeline, and Progress at
@@ -121,6 +122,13 @@ func (t *Timeline) To(tw Tween, at ...Placement) float32 {
 	t.st.segs = t.segs
 	if end := start + tw.Duration; end > t.st.build {
 		t.st.build = end
+		if t.st.done && !t.st.over && end > t.st.duration {
+			// The view arranges a timeline that reaches past the one the
+			// playhead came to rest in: ask for the frame that plays it,
+			// rather than rest on it, and report it as unfinished until
+			// then.
+			t.c.AnimationFrame()
+		}
 	}
 	t.prevStart, t.prevEnd = start, start+tw.Duration
 	return t.show(seg)
@@ -190,7 +198,16 @@ func (t *Timeline) Progress() float32 {
 // Done reports whether the timeline came to rest at its end, its repeats
 // played out, for the view to go on as with Element.Settled.
 func (t *Timeline) Done() bool {
-	return t != nil && t.st.done
+	if t == nil || !t.st.done {
+		return false
+	}
+	if t.st.over {
+		// Less motion: it settled in the frame it was built in.
+		return true
+	}
+	// A view that arranges a longer timeline than the one the playhead came
+	// to rest in has not finished: the frame that plays it is coming.
+	return t.st.build <= t.st.duration
 }
 
 // Arrived is true in the one frame in which the timeline came to rest, for
@@ -249,10 +266,19 @@ func (t *Timeline) show(s tweenSeg) float32 {
 		return s.to
 	}
 	now := st.t
+	if s.dur <= 0 {
+		// A tween that takes no time is where it ends as soon as its time
+		// comes, at the end of the timeline as anywhere else: the playhead
+		// comes to rest on it there.
+		if now >= s.start {
+			return s.to
+		}
+		return s.from
+	}
 	if now <= s.start {
 		return s.from
 	}
-	if s.dur <= 0 || now >= s.start+s.dur {
+	if now >= s.start+s.dur {
 		return s.to
 	}
 	p := float32(now-s.start) / float32(s.dur)
@@ -276,7 +302,7 @@ func (t *Timeline) begin(o TimelineOptions) {
 		st.duration, st.build = st.build, 0
 		st.segs, st.labels = st.segs[:0], st.labels[:0]
 		t.segs = st.segs
-		t.advance(o)
+		t.tick(o)
 		return
 	}
 	if st.pass != rt.pass {
@@ -286,29 +312,45 @@ func (t *Timeline) begin(o TimelineOptions) {
 		t.segs = st.segs
 	}
 	t.prevStart, t.prevEnd = 0, 0
+	// The clock of this frame moved once already: what the options say now
+	// still decides what the pass shows, so a handler that paused, reversed
+	// or played the timeline over shows it in the frame it ran in, as a
+	// changed value the view builds later shows in the same frame.
+	t.cue(o)
 }
 
-// advance moves the playhead to this frame's time and asks for the frame
-// that goes on, once per frame, as long as the timeline moves.
-func (t *Timeline) advance(o TimelineOptions) {
+// tick moves the playhead on by this frame's time, once per frame.
+func (t *Timeline) tick(o TimelineOptions) {
 	st, c := t.st, t.c
 	if o.Repeat < RepeatForever || o.Delay < 0 || o.RepeatDelay < 0 {
 		panic("ui: a Timeline Repeat must be RepeatForever or nonnegative, and its delays nonnegative")
 	}
-	now := c.now
-	known := st.started
 	if !st.started {
-		st.started, st.at, st.run = true, now, o.Run
+		st.started, st.at, st.run = true, c.now, o.Run
 	} else {
-		dt := now.Sub(st.at)
-		st.at = now
-		if dt > 0 && !o.Paused {
+		st.built = true
+		dt := c.now.Sub(st.at)
+		was := st.paused
+		st.at = c.now
+		// Time spent paused is not time played: a paused timeline asks for
+		// no frames, so the frame that lets the pause go carries the whole
+		// pause in its delta and would jump the playhead forward by it.
+		if dt > 0 && !o.Paused && !was {
 			st.raw += dt
 		}
-		if st.run != o.Run {
-			st.run, st.raw, st.done, st.over, st.rested = o.Run, 0, false, false, 0
-		}
 	}
+	t.cue(o)
+}
+
+// cue puts the playhead where this pass's options ask and asks for the frame
+// that goes on, as long as the timeline moves.
+func (t *Timeline) cue(o TimelineOptions) {
+	st, c := t.st, t.c
+	if st.run != o.Run {
+		// Run plays the timeline over, in the frame it changes in.
+		st.run, st.raw, st.done, st.over, st.rested = o.Run, 0, false, false, 0
+	}
+	st.paused = o.Paused
 	if c.rt.preferences().ReduceMotion {
 		// Values and poses go to their targets at once, and a sequence
 		// ends at its last value: the timeline is over where it would
@@ -339,7 +381,7 @@ func (t *Timeline) advance(o TimelineOptions) {
 		// A timeline whose tweens take no time is over as soon as a
 		// frame has gone by: the frame it is first built in has no
 		// duration yet to be over.
-		st.done = known
+		st.done = st.built
 	}
 	if o.Reverse {
 		if st.t = st.duration - st.t; st.t < 0 {
@@ -350,6 +392,17 @@ func (t *Timeline) advance(o TimelineOptions) {
 		if st.rested == 0 {
 			st.rested = c.rt.frame
 		}
+		return
+	}
+	// It moves again, so the next time it comes to rest is an arrival of
+	// its own, as Arrived reports.
+	st.rested = 0
+	if held && !st.built {
+		// A part of the duration, or a time, asked for in the frame the
+		// timeline is first built in: it has no duration to take a part
+		// of yet, so ask for the frame that knows one, rather than sit
+		// at the start.
+		c.AnimationFrame()
 		return
 	}
 	if !o.Paused && !held {
@@ -438,6 +491,8 @@ type timelineState struct {
 	pass     int           // the pass it was built in, to build once per pass
 	at       time.Time     // the time of that frame's clock
 	started  bool          // whether it has a time to measure from
+	built    bool          // whether a frame before this one built it
+	paused   bool          // whether the last pass asked for it to be paused
 	run      uint64        // the Run it plays, to restart when it changes
 	raw      time.Duration // how long it has played, unrolled
 	duration time.Duration // the last frame's Duration, which folds this one

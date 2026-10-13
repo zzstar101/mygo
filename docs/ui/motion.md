@@ -339,9 +339,13 @@ for i, shown := range app.rows {
 
 `Duration` is the end of the last tween, `Time` where the playhead is, and
 `Progress` how far along it is, from 0 to 1, for a scrubber. `Paused` holds
-the playhead, `Reverse` plays it backward to its start, and `Seek` and
+the playhead where it is: time a paused timeline spends is not time it
+played, so letting a pause go plays on from where it held, however long the
+pause was. `Reverse` plays it backward to its start, and `Seek` and
 `Progress` hold it at a time or a part of the timeline for as long as they
-are given, going on from there when they are not:
+are given, going on from there when they are not. What the options say takes
+effect in the frame it is said in, so a button that pauses or plays the
+timeline again shows in the frame it was clicked in:
 
 ```go
 o := ui.TimelineOptions{Run: app.run, Paused: app.paused, Reverse: app.reverse}
@@ -362,8 +366,10 @@ the value it got to between plays. `Done` reports that it came to rest, and
 Change `Run` to play the timeline again, or a changed one. Building it
 without changing `Run` keeps the playhead where it is, so a view may
 rearrange its tweens from frame to frame: the timeline plays the ones it
-arranged this frame. A timeline the view stops building goes, and its state
-with it, as an element's does.
+arranged this frame. Arranging a longer one goes on from where the playhead
+is, and it is not `Done` until the timeline it arranged has played. A
+timeline the view stops building goes, and its state with it, as an
+element's does.
 
 While the desktop asks for less motion, every tween shows its `To` at once
 and the timeline is over, as values, poses and `Keyframes` are, and it asks

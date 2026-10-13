@@ -30,6 +30,18 @@ func resting(t *testing.T, tt *Tester) {
 	}
 }
 
+// timelineClickTester is a timelineTester that also collects what it takes
+// to find an element and click it.
+func timelineClickTester(view func(*context)) (*Tester, *time.Time) {
+	now := time.Unix(2000, 0)
+	h := &headless{w: 400, h: 300, scale: 1}
+	tt := &Tester{h: h, rt: newRuntime(view, h)}
+	tt.rt.collect, tt.rt.strict = true, true
+	tt.rt.clock = func() time.Time { return now }
+	tt.settle()
+	return tt, &now
+}
+
 func TestTimelinePlaysTweensOneAfterTheOther(t *testing.T) {
 	var x, y float32
 	var dur time.Duration
@@ -207,6 +219,8 @@ func TestTimelinePauseAndResume(t *testing.T) {
 	step(tt, now, 100*time.Millisecond)
 	closeFloat(t, x, 25) // time passes and nothing moves
 	paused = false
+	tt.Frame() // the frame that lets the pause go plays no time
+	closeFloat(t, x, 25)
 	step(tt, now, 100*time.Millisecond)
 	closeFloat(t, x, 50) // it goes on where it was held
 }
@@ -578,4 +592,151 @@ func TestTimelinePlaysOnceAtOnce(t *testing.T) {
 		t.Fatal("a timeline of one instant tween is not done")
 	}
 	resting(t, tt)
+}
+
+func TestTimelineEndsATweenThatTakesNoTime(t *testing.T) {
+	// An instant tween at the very end of a timeline is where it ends:
+	// the playhead comes to rest on the time it is placed at.
+	var x, last float32
+	var done bool
+	tt, now := timelineTester(func(c *context) {
+		tl := coreNewTimeline(c, "instant-end", TimelineOptions{})
+		x = tl.To(Tween{From: 0, To: 100, Duration: 400 * time.Millisecond})
+		last = tl.To(Tween{From: 0, To: 1})
+		done = tl.Done()
+	})
+	closeFloat(t, last, 0) // its time has not come yet
+	step(tt, now, 400*time.Millisecond)
+	closeFloat(t, x, 100)
+	closeFloat(t, last, 1)
+	if !done {
+		t.Fatal("the timeline is not done")
+	}
+	resting(t, tt)
+}
+
+func TestTimelinePausedTimeIsNotPlayedTime(t *testing.T) {
+	var x float32
+	paused := false
+	tt, now := timelineTester(func(c *context) {
+		tl := coreNewTimeline(c, "pause-idle", TimelineOptions{Paused: paused})
+		x = tl.To(Tween{From: 0, To: 100, Duration: time.Second})
+	})
+	step(tt, now, 250*time.Millisecond)
+	closeFloat(t, x, 25)
+	paused = true
+	tt.Frame()
+	closeFloat(t, x, 25)
+	resting(t, tt)
+	// Five seconds go by with no frames at all, as they do for a paused
+	// timeline in a window that needs no drawing.
+	*now = now.Add(5 * time.Second)
+	paused = false
+	tt.Frame() // the frame that lets the pause go plays no time
+	closeFloat(t, x, 25)
+	step(tt, now, 100*time.Millisecond)
+	closeFloat(t, x, 35)
+}
+
+func TestTimelineStartsWhereItIsAsked(t *testing.T) {
+	// A part of the duration, or a time, given in the frame the timeline is
+	// first built: its duration is not known yet, so the timeline asks for
+	// the frame that shows where the part lands.
+	var x float32
+	part := float32(0.25)
+	tt, _ := timelineTester(func(c *context) {
+		tl := coreNewTimeline(c, "part-at-once", TimelineOptions{Progress: &part})
+		x = tl.To(Tween{From: 0, To: 100, Duration: 400 * time.Millisecond})
+	})
+	closeFloat(t, x, 25)
+	resting(t, tt)
+
+	where := 100 * time.Millisecond
+	tt, _ = timelineTester(func(c *context) {
+		tl := coreNewTimeline(c, "seek-at-once", TimelineOptions{Seek: &where})
+		x = tl.To(Tween{From: 0, To: 100, Duration: 400 * time.Millisecond})
+	})
+	closeFloat(t, x, 25)
+	resting(t, tt)
+}
+
+func TestTimelinePlaysOnADefinitionThatGoesOn(t *testing.T) {
+	var x float32
+	var done bool
+	span := 400 * time.Millisecond
+	tt, now := timelineTester(func(c *context) {
+		tl := coreNewTimeline(c, "grow", TimelineOptions{})
+		x = tl.To(Tween{From: 0, To: 100, Duration: span})
+		done = tl.Done()
+	})
+	step(tt, now, 400*time.Millisecond)
+	closeFloat(t, x, 100)
+	resting(t, tt)
+	// The same Run, a longer timeline: it goes on from where the playhead
+	// is instead of resting where the old one ended.
+	span = 800 * time.Millisecond
+	tt.Frame()
+	if done {
+		t.Fatal("a timeline that goes on is done")
+	}
+	closeFloat(t, x, 50)
+	if !tt.rt.animating {
+		t.Fatal("a timeline that goes on stopped asking for frames")
+	}
+	step(tt, now, 200*time.Millisecond)
+	closeFloat(t, x, 75)
+}
+
+func TestTimelineArrivesAgainAfterSeekingBack(t *testing.T) {
+	var x float32
+	var arrived bool
+	var where *time.Duration
+	tt, now := timelineTester(func(c *context) {
+		tl := coreNewTimeline(c, "arrive-again", TimelineOptions{Seek: where})
+		x = tl.To(Tween{From: 0, To: 100, Duration: 400 * time.Millisecond})
+		arrived = tl.Arrived()
+	})
+	step(tt, now, 400*time.Millisecond)
+	closeFloat(t, x, 100)
+	if !arrived {
+		t.Fatal("the timeline did not arrive")
+	}
+	// Seek back into it: it moves again, so coming to rest again is an
+	// arrival of its own.
+	back := 200 * time.Millisecond
+	where = &back
+	tt.Frame()
+	if arrived {
+		t.Fatal("Arrived while the timeline is seeked back")
+	}
+	where = nil
+	step(tt, now, 200*time.Millisecond)
+	closeFloat(t, x, 100)
+	if !arrived {
+		t.Fatal("Arrived is false when the timeline comes to rest again")
+	}
+}
+
+func TestTimelineAppliesOptionsInTheFrameTheyChange(t *testing.T) {
+	// A control that plays the timeline over runs while the frame builds,
+	// after the view built the timeline: the frame the window shows is the
+	// one that plays it again, and it goes on asking for frames.
+	var run uint64
+	var x float32
+	tt, now := timelineClickTester(func(c *context) {
+		tl := coreNewTimeline(c, "restart", TimelineOptions{Run: run})
+		x = tl.To(Tween{From: 0, To: 100, Duration: time.Second})
+		if coreButton(c, "Restart").Clicked() {
+			run++
+		}
+	})
+	step(tt, now, time.Second)
+	closeFloat(t, x, 100)
+	resting(t, tt)
+	if err := tt.Click("Restart"); err != nil {
+		t.Fatal(err)
+	}
+	closeFloat(t, x, 0)
+	step(tt, now, 200*time.Millisecond)
+	closeFloat(t, x, 20)
 }
