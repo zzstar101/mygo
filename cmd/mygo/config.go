@@ -66,6 +66,17 @@ type Config struct {
 	// hold the files of one platform.
 	Resources []string `json:"resources"`
 
+	// Languages are the languages the app ships, in the order of their
+	// tags: the first is the app's own, which a system that has none of
+	// them falls back to, and which a build declares as the development
+	// region of an app bundle. `mygo build` writes them into what the
+	// system reads of the app: the localizations of an app bundle, which
+	// the system's own menus and dialogs and its Finder show, the desktop
+	// entry Linux shows in a launcher, the languages of the Windows
+	// installer, and the file properties of Windows. An app without them
+	// is in the language of its name alone.
+	Languages []Language `json:"languages"`
+
 	// URLSchemes are the custom URL schemes (deep links) of the app, e.g.
 	// "myapp" for myapp://…, whose URLs reach mygo.App.OnOpenURL. macOS
 	// registers them with the app bundle, Linux with the desktop entry
@@ -91,6 +102,22 @@ func (c *Config) configName() string {
 		return jsonConfig
 	}
 	return filepath.Base(c.file)
+}
+
+// Language is one language the app ships: what the system calls it, in the
+// locales of that language.
+type Language struct {
+	// Tag is the language tag, in the form a desktop reports it, e.g. "en",
+	// "zh-Hans", "zh-Hant-HK" or "pt-BR".
+	Tag string `json:"tag"`
+	// Name is the app's name in the language (default: the app's name).
+	Name string `json:"name"`
+	// Comment describes the app in the language, for the desktop entry of
+	// Linux (default: linux.comment).
+	Comment string `json:"comment"`
+	// Keywords are the words that find the app in the language, as a
+	// launcher searches them (Linux).
+	Keywords []string `json:"keywords"`
 }
 
 // FileAssociation is a type of file the app opens: the system lists the app
@@ -246,6 +273,27 @@ func (c *Config) validate() error {
 			return fmt.Errorf("urlSchemes: %q is not a URL scheme (a letter, then letters, digits, +, - or .)", scheme)
 		}
 	}
+	seen := map[string]bool{}
+	for i, l := range c.Languages {
+		if !languageTagRe.MatchString(l.Tag) {
+			return fmt.Errorf("languages[%d]: %q is not a language tag, such as en, zh-Hans or pt-BR", i, l.Tag)
+		}
+		key := strings.ToLower(l.Tag)
+		if seen[key] {
+			return fmt.Errorf("languages: %q is there more than once", l.Tag)
+		}
+		seen[key] = true
+		for _, v := range []string{l.Name, l.Comment} {
+			if strings.ContainsAny(v, "\r\n") {
+				return fmt.Errorf("languages[%d] (%s): the name and comment of a language cannot break the line", i, l.Tag)
+			}
+		}
+		for _, k := range l.Keywords {
+			if k == "" || strings.ContainsAny(k, `;\`+"\r\n") {
+				return fmt.Errorf("languages[%d] (%s): %q is not a keyword (no empty word, no semicolon or backslash)", i, l.Tag, k)
+			}
+		}
+	}
 	for _, v := range []string{c.Name, c.Version, c.Identifier} {
 		if strings.Contains(v, "'") && strings.Contains(v, `"`) {
 			return fmt.Errorf("%q cannot contain both kinds of quotes", v)
@@ -260,9 +308,10 @@ func (c *Config) validate() error {
 }
 
 var (
-	nonIdent = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-	schemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*$`)
-	extRe    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_+-]*$`)
+	nonIdent      = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+	schemeRe      = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*$`)
+	extRe         = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_+-]*$`)
+	languageTagRe = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{1,8})*$`)
 )
 
 func (c *Config) applyDefaults() {
@@ -311,6 +360,14 @@ func (c *Config) applyDefaults() {
 			c.Bindings = filepath.Join("src", "mygo.ts")
 		case c.DevURL != "" || c.DevCommand != "" || c.BuildCommand != "" || c.FrontendDist != "":
 			c.Bindings = "mygo.ts"
+		}
+	}
+	for i := range c.Languages {
+		if c.Languages[i].Name == "" {
+			c.Languages[i].Name = c.Name
+		}
+		if c.Languages[i].Comment == "" {
+			c.Languages[i].Comment = c.Linux.Comment
 		}
 	}
 }

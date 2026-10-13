@@ -50,6 +50,9 @@ func writeBundle(c *Config, dir, bin string, icns []byte, car *assetCatalog, res
 	if err := copyResources(res, filepath.Join(contents, "Resources")); err != nil {
 		return "", err
 	}
+	if err := writeLocalizations(c, filepath.Join(contents, "Resources")); err != nil {
+		return "", err
+	}
 	if err := os.WriteFile(filepath.Join(contents, "Info.plist"), infoPlist(c, name, iconFile, iconName), 0o644); err != nil {
 		return "", err
 	}
@@ -63,6 +66,38 @@ func writeBundle(c *Config, dir, bin string, icns []byte, car *assetCatalog, res
 func bundleExecutable(app string) string {
 	name := filepath.Base(app)
 	return filepath.Join(app, "Contents", "MacOS", name[:len(name)-len(".app")])
+}
+
+// writeLocalizations writes the InfoPlist.strings of the languages of the
+// app into the Resources of a bundle, which name the app in that language:
+// the Finder, the menu bar and the dialogs of the system say the app's name
+// in the language of the system. A language the app names the same as
+// itself needs no file.
+func writeLocalizations(c *Config, resources string) error {
+	for _, l := range c.Languages {
+		name := l.Name
+		if name == "" {
+			name = c.Name
+		}
+		if name == c.Name {
+			continue
+		}
+		dir := filepath.Join(resources, l.Tag+".lproj")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		var b bytes.Buffer
+		b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+`)
+		writePlistValue(&b, map[string]any{"CFBundleDisplayName": name, "CFBundleName": name}, "")
+		b.WriteString("</plist>\n")
+		if err := os.WriteFile(filepath.Join(dir, "InfoPlist.strings"), b.Bytes(), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // appIcon renders the configured icon as .icns, or returns nil without one.
@@ -167,6 +202,16 @@ func infoPlist(c *Config, executable, icon, iconName string) []byte {
 		"NSPrincipalClass":                     "NSApplication",
 		"NSHighResolutionCapable":              true,
 		"NSSupportsAutomaticGraphicsSwitching": true,
+	}
+	if len(c.Languages) > 0 {
+		// The first language is the app's own: the one the system falls
+		// back to, and the development region of the bundle.
+		d["CFBundleDevelopmentRegion"] = c.Languages[0].Tag
+		var locales []any
+		for _, l := range c.Languages {
+			locales = append(locales, l.Tag)
+		}
+		d["CFBundleLocalizations"] = locales
 	}
 	if icon != "" {
 		d["CFBundleIconFile"] = icon

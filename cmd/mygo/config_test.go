@@ -133,6 +133,7 @@ func TestConfigTypes(t *testing.T) {
 	property := regexp.MustCompile(`(?m)^  (\w+)\??:`)
 	for name, typ := range map[string]reflect.Type{
 		"Config":          reflect.TypeFor[Config](),
+		"Language":        reflect.TypeFor[Language](),
 		"FileAssociation": reflect.TypeFor[FileAssociation](),
 		"UpdatesConfig":   reflect.TypeFor[Updates](),
 		"S3Config":        reflect.TypeFor[S3](),

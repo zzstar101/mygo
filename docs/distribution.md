@@ -73,6 +73,10 @@ export default defineConfig({
 - `version` is the app's version, which `App.Version()` returns and
   [updates](updates.md) compare.
 
+The name is another one in each language the app ships, which a build writes
+into what the system reads of the app: see [the languages of a
+build](i18n.md#the-languages-a-build-declares).
+
 The icon is `resources/icon.png`, or the `icon` of the configuration: a square PNG,
 ideally 1024×1024. `mygo build` makes it the `.icns` of macOS, the icon
 resource of the Windows executable and the icon of the Linux desktop entry.
@@ -258,7 +262,10 @@ package has no file for fails.
 ## macOS
 
 `mygo build` makes an app bundle, signs it, and puts it in a disk image
-whose window invites users to drag the app to Applications.
+whose window invites users to drag the app to Applications. A language the
+app [declares](i18n.md#the-languages-a-build-declares) adds the
+`CFBundleLocalizations` of the bundle and an `InfoPlist.strings` naming the
+app in it, which the Finder, the menu bar and the system's own dialogs use.
 
 ### Signing and notarization
 
@@ -331,6 +338,10 @@ the app's URL schemes and file associations. Its last page offers to run
 the app and to create a desktop shortcut, which is checked; silent
 installs (`/S`) create none.
 
+The installer is in each language the app [declares](i18n.md#the-languages-a-build-declares),
+and picks among them by the language of the system. A language NSIS has no
+language file for is skipped, with a message.
+
 The installer is made with [NSIS](https://nsis.sourceforge.io). On
 Windows, `mygo build` uses NSIS when it is installed, and otherwise
 downloads it the first time it needs it: the official NSIS 3.13 zip, from
@@ -391,6 +402,9 @@ The package depends on GTK 3 and WebKitGTK; `depends` adds more packages.
 the app.
 `comment` describes the app in its desktop entry and package, and
 `categories` places it in application menus (`Utility` by default).
+A language the app [declares](i18n.md#the-languages-a-build-declares)
+adds its `Name[zh_Hans]`, `Comment[zh_Hans]` and `Keywords[zh_Hans]` to the
+desktop entry, which a launcher shows in the language of the system.
 The app opens from the applications menu. `command` also gives it a
 command, `/usr/bin/my-app` from the package and `~/.local/bin/my-app` from
 [`install.sh`](#the-install-script); without it, neither adds a command,

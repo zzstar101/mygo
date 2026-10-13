@@ -24,6 +24,7 @@ export default defineConfig({
   resources: ["third_party/licenses"],
   urlSchemes: ["myapp"],
   fileAssociations: [{ ext: ["md"], name: "Markdown Document", mimeType: "text/markdown" }],
+  languages: [{ tag: "en" }, { tag: "zh-Hans", name: "笔记" }],
 
   updates: { publicKey: "…", github: "you/my-app" },
   macos: { signingIdentity: "Developer ID Application: Jane Doe (TEAMID)" },
@@ -78,6 +79,33 @@ Each file association has:
 | `name` | what the files are: `"Markdown Document"` |
 | `mimeType` | their MIME type, by which Linux identifies files; without one the app defines `application/x-<app>-<ext>` |
 | `role` | `Editor` (the default) or `Viewer`, on macOS |
+
+## Languages
+
+The languages the app ships, in the order of their tags, which `mygo build`
+writes into what each system reads of the app: the localizations of an app
+bundle, which the Finder, the menu bar and the system's own dialogs use,
+the desktop entry a Linux launcher shows, the languages of the Windows
+installer, and the file properties Windows shows. The first language is the
+app's own: the one a system that has none of them falls back to, and the
+development region of the app bundle. An app that declares none is in the
+language of its name alone.
+
+| Field | Default | |
+|---|---|---|
+| `tag` | | the language tag, as a desktop reports it: `"en"`, `"zh-Hans"`, `"zh-Hant-HK"`, `"pt-BR"` |
+| `name` | `name` | the app's name in the language |
+| `comment` | `linux.comment` | what the app is, in the language, for its desktop entry |
+| `keywords` | | the words that find the app in the language, as a launcher searches them |
+
+```ts
+languages: [
+  { tag: "en" },
+  { tag: "zh-Hans", name: "笔记", comment: "随手记笔记", keywords: ["笔记", "记事本"] },
+],
+```
+
+The strings *inside* the app are another matter: see [i18n](i18n.md).
 
 ## updates
 

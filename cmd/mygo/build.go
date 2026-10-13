@@ -540,16 +540,38 @@ func writeLinuxDesktop(c *Config, dir, name string) ([]string, error) {
 }
 
 // linuxDesktopEntry renders the desktop entry of the app, which runs exec
-// and shows icon.
+// and shows icon, in each language the app declares: a launcher shows the
+// name, the comment and the keywords of the language of the system, and the
+// app's own name where it has none of them.
 func linuxDesktopEntry(c *Config, exec, icon string) string {
 	categories := c.Linux.Categories
 	if len(categories) == 0 {
 		categories = []string{"Utility"}
 	}
+	name, comment, keywords := c.desktopNames()
 	var b strings.Builder
-	b.WriteString("[Desktop Entry]\nType=Application\nName=" + c.Name + "\n")
-	if c.Linux.Comment != "" {
-		b.WriteString("Comment=" + c.Linux.Comment + "\n")
+	b.WriteString("[Desktop Entry]\nType=Application\nName=" + name + "\n")
+	for _, l := range c.Languages {
+		if l.Name != "" && l.Name != name {
+			b.WriteString("Name[" + desktopTag(l.Tag) + "]=" + l.Name + "\n")
+		}
+	}
+	if comment != "" {
+		b.WriteString("Comment=" + comment + "\n")
+	}
+	for _, l := range c.Languages {
+		if l.Comment != "" && l.Comment != comment {
+			b.WriteString("Comment[" + desktopTag(l.Tag) + "]=" + l.Comment + "\n")
+		}
+	}
+	if len(keywords) > 0 {
+		b.WriteString("Keywords=" + strings.Join(keywords, ";") + ";\n")
+	}
+	for _, l := range c.Languages {
+		if len(l.Keywords) == 0 || slices.Equal(l.Keywords, keywords) {
+			continue
+		}
+		b.WriteString("Keywords[" + desktopTag(l.Tag) + "]=" + strings.Join(l.Keywords, ";") + ";\n")
 	}
 	var mime []string
 	for _, fa := range c.FileAssociations {
@@ -569,4 +591,21 @@ func linuxDesktopEntry(c *Config, exec, icon string) string {
 		b.WriteString("MimeType=" + strings.Join(mime, ";") + ";\n")
 	}
 	return b.String()
+}
+
+// desktopNames returns the name, the comment and the keywords a desktop
+// entry shows where the language of the system is not one of the app's: the
+// name of the app, the comment of the configuration or of a language, and
+// the keywords of the first language that has them.
+func (c *Config) desktopNames() (name, comment string, keywords []string) {
+	name, comment = c.Name, c.Linux.Comment
+	for _, l := range c.Languages {
+		if comment == "" {
+			comment = l.Comment
+		}
+		if len(keywords) == 0 {
+			keywords = l.Keywords
+		}
+	}
+	return name, comment, keywords
 }

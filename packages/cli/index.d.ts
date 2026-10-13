@@ -93,6 +93,15 @@ export interface Config {
    * `resources/linux-amd64`, hold the files of one platform.
    */
   resources?: string[];
+  /**
+   * The languages the app ships, in the order of their tags: the first is
+   * the app's own, which a system that has none of them falls back to.
+   * `mygo build` writes them into what the system reads of the app: the
+   * localizations of an app bundle, which the system's own menus and dialogs
+   * and its Finder show, the desktop entry Linux shows in a launcher, the
+   * languages of the Windows installer, and the file properties of Windows.
+   */
+  languages?: Language[];
   /** The URL schemes the app opens, such as `myapp` for `myapp://…`, which reach `App.OnOpenURL`. */
   urlSchemes?: string[];
   /** The types of files the app opens, which reach `App.OnOpenFile`. */
@@ -105,6 +114,18 @@ export interface Config {
   windows?: WindowsConfig;
   /** Linux packaging. */
   linux?: LinuxConfig;
+}
+
+/** One language the app ships: what the system calls it, in that language. */
+export interface Language {
+  /** The language tag, as a desktop reports it, e.g. `"en"`, `"zh-Hans"` or `"pt-BR"`. */
+  tag: string;
+  /** The app's name in the language (default: the app's name). */
+  name?: string;
+  /** What the app is, in the language (default: `linux.comment`). */
+  comment?: string;
+  /** The words that find the app in the language, as a launcher searches them (Linux). */
+  keywords?: string[];
 }
 
 /** A type of file the app opens. */
