@@ -22,7 +22,13 @@ func cookieStore() (id, error) {
 
 func readCookie(c id) platform.Cookie {
 	out := platform.Cookie{Name: goString(send(c, "name")), Value: goString(send(c, "value")), Domain: strings.ToLower(goString(send(c, "domain"))), Path: goString(send(c, "path")), Secure: sendBool(c, "isSecure"), HTTPOnly: sendBool(c, "isHTTPOnly")}
+	// Foundation names only Lax and Strict, and macOS 26 gives a cookie
+	// set with SameSite=None no policy, which WebKit sends as None
+	// (coreSameSitePolicy in CookieCocoa.mm).
 	out.SameSite = strings.ToLower(goString(send(c, "sameSitePolicy")))
+	if out.SameSite == "" {
+		out.SameSite = "none"
+	}
 	date := send(c, "expiresDate")
 	if date != 0 && !sendBool(c, "isSessionOnly") {
 		out.Expires = time.Unix(int64(msgFloat(date, sel("timeIntervalSince1970"))), 0).UTC()
@@ -88,7 +94,9 @@ func (a appController) SetCookie(c platform.Cookie, done func(error)) {
 		native := send(array, "objectAtIndex:", 0)
 		parsed := readCookie(native)
 		if parsed.Name != c.Name || parsed.Domain != c.Domain || parsed.Path != c.Path || parsed.Value != c.Value || parsed.Secure != c.Secure || parsed.HTTPOnly != c.HTTPOnly || parsed.SameSite != c.SameSite {
-			done(fmt.Errorf("mygo: cookies: Set parser cannot preserve requested identity or attributes"))
+			// Say what differs, without the value.
+			parsed.Value, c.Value = "", ""
+			done(fmt.Errorf("mygo: cookies: Set made NSHTTPCookie %+v of %+v", parsed, c))
 			return
 		}
 		block := newBlock(func(objc.Block) { a.b.runOnMain(func() { done(nil) }) })
