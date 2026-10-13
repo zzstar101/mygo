@@ -3170,7 +3170,7 @@ which npm allows only for packages that exist: the first release uses an
 | power events | NSWorkspace sleep/wake, `com.apple.screenIsLocked` distributed notifications | logind `PrepareForSleep` (system bus), screen saver `ActiveChanged` (GNOME, freedesktop) | `WM_POWERBROADCAST`, `WM_WTSSESSION_CHANGE` |
 | KeepAwake | `NSProcessInfo` activity (shows in `pmset -g assertions`) | XDG portal `Inhibit`, else `org.freedesktop.ScreenSaver.Inhibit` | `PowerCreateRequest` |
 | IsOnBattery, IdleTime | IOKit power sources, `CGEventSourceSecondsSinceLastEventType` | `/sys/class/power_supply`; Mutter idle monitor or `GetSessionIdleTime` | `GetSystemPowerStatus`, `GetLastInputInfo` |
-| network status | `nw_path_monitor`, `nw_path_is_expensive` and `nw_path_is_constrained` | `GNetworkMonitor`, `network-available` and `network-metered` | `GetNetworkConnectivityHint`, `NotifyIpInterfaceChange` |
+| network status | `nw_path_monitor` on a queue of its own, the first `Status` waiting for its first path | `GNetworkMonitor`, `network-available` and `network-metered` | `GetNetworkConnectivityHint`, `NotifyNetworkConnectivityHintChange` |
 | window position | honored | ignored by Wayland compositors | honored |
 | resize borders without a title bar | the window's own | the outer 5 px of the page | invisible, outside the window; along the top of a hidden title bar, a child window |
 | content protection, click-through | yes | ignored | yes |

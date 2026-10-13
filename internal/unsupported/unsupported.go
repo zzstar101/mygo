@@ -141,6 +141,7 @@ func (power) IdleTime() time.Duration       { return 0 }
 
 type network struct{}
 
+func (network) Watch()                         {}
 func (network) Status() platform.NetworkStatus { return platform.NetworkStatus{} }
 
 type secrets struct{}

@@ -3,6 +3,9 @@
 package darwin
 
 import (
+	"sync"
+	"time"
+
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 
@@ -12,8 +15,6 @@ import (
 // Network.framework, a C API: no Objective-C objects, no reference
 // counting beyond the monitor itself, and blocks instead of a delegate.
 var (
-	libNetwork uintptr
-
 	nwPathMonitorCreate           func() uintptr
 	nwPathMonitorSetUpdateHandler func(monitor, handler uintptr)
 	nwPathMonitorSetQueue         func(monitor, queue uintptr)
@@ -21,72 +22,100 @@ var (
 	nwPathGetStatus               func(path uintptr) int32
 	nwPathIsExpensive             func(path uintptr) bool
 	nwPathIsConstrained           func(path uintptr) bool
-
-	// dispatchGetMainQueue is the address of _dispatch_main_q, the main
-	// queue. dispatch_get_main_queue itself is a static inline in the SDK
-	// that returns it, so it has no symbol to bind.
-	dispatchGetMainQueue uintptr
+	dispatchQueueCreate           func(label *byte, attr uintptr) uintptr
 )
 
 // nw_path_status_satisfied: the path has a usable route to send and
 // receive data on.
 const nwPathStatusSatisfied = 1
 
-// networkMonitor is the app's single path monitor and the status it last
-// reported. Both are only touched on the main thread, which is where the
-// monitor's queue dispatches its blocks.
+// networkMonitor is the app's single path monitor, started by the first
+// Status or Watch. Its handler runs on a queue of its own, so that Status
+// can wait on the main thread for the first path, which the monitor
+// reports asynchronously, as Chromium's NetworkChangeNotifierApple waits
+// for its first connection type.
 var networkMonitor struct {
-	monitor uintptr
-	status  platform.NetworkStatus
-}
+	once  sync.Once
+	ready chan struct{} // closed with the first path
 
-func loadNetwork() {
-	libNetwork = mustDlopen("/System/Library/Frameworks/Network.framework/Network")
-	purego.RegisterLibFunc(&nwPathMonitorCreate, libNetwork, "nw_path_monitor_create")
-	purego.RegisterLibFunc(&nwPathMonitorSetUpdateHandler, libNetwork, "nw_path_monitor_set_update_handler")
-	purego.RegisterLibFunc(&nwPathMonitorSetQueue, libNetwork, "nw_path_monitor_set_queue")
-	purego.RegisterLibFunc(&nwPathMonitorStart, libNetwork, "nw_path_monitor_start")
-	purego.RegisterLibFunc(&nwPathGetStatus, libNetwork, "nw_path_get_status")
-	purego.RegisterLibFunc(&nwPathIsExpensive, libNetwork, "nw_path_is_expensive")
-	purego.RegisterLibFunc(&nwPathIsConstrained, libNetwork, "nw_path_is_constrained")
-	dispatchGetMainQueue = mustDlsym(purego.RTLD_DEFAULT, "_dispatch_main_q")
+	mu     sync.Mutex
+	status platform.NetworkStatus
+
+	watching bool // on the main thread
 }
 
 type network struct{ b *Backend }
 
 func (b *Backend) Network() platform.Network { return network{b} }
 
-// Status returns the status the monitor last reported.
-func (network) Status() platform.NetworkStatus { return networkMonitor.status }
-
-// startNetworkMonitor starts the app's single path monitor. It is called
-// once, from Backend.Init, on the main thread, so that Status answers from
-// the very first call.
-func startNetworkMonitor() {
-	m := nwPathMonitorCreate()
-	if m == 0 {
-		// Only a failed allocation gets here. Reporting offline is the
-		// safe answer for an app that syncs or downloads.
-		return
+// Status returns the status of the monitor's latest path.
+func (network) Status() platform.NetworkStatus {
+	startNetworkMonitor()
+	select {
+	case <-networkMonitor.ready:
+	case <-time.After(time.Second):
+		// The first path comes within milliseconds; never hang the app
+		// on a monitor that does not answer.
 	}
-	// The block is scheduled on the main queue, which is MyGo's main
-	// thread, so it may call the handler directly. It touches no
-	// Objective-C object, so it needs no autorelease pool.
-	blk := newBlock(func(_ objc.Block, path uintptr) {
-		status := platform.NetworkStatus{
-			Online:      nwPathGetStatus(path) == nwPathStatusSatisfied,
-			Constrained: nwPathIsExpensive(path) || nwPathIsConstrained(path),
+	networkMonitor.mu.Lock()
+	defer networkMonitor.mu.Unlock()
+	return networkMonitor.status
+}
+
+// Watch reports the paths after the first to AppHandler.NetworkChanged.
+func (network) Watch() {
+	networkMonitor.watching = true
+	startNetworkMonitor()
+}
+
+// startNetworkMonitor creates and starts the monitor once. Network.framework
+// is loaded only then, by apps that ask.
+func startNetworkMonitor() {
+	networkMonitor.once.Do(func() {
+		networkMonitor.ready = make(chan struct{})
+		lib := mustDlopen("/System/Library/Frameworks/Network.framework/Network")
+		purego.RegisterLibFunc(&nwPathMonitorCreate, lib, "nw_path_monitor_create")
+		purego.RegisterLibFunc(&nwPathMonitorSetUpdateHandler, lib, "nw_path_monitor_set_update_handler")
+		purego.RegisterLibFunc(&nwPathMonitorSetQueue, lib, "nw_path_monitor_set_queue")
+		purego.RegisterLibFunc(&nwPathMonitorStart, lib, "nw_path_monitor_start")
+		purego.RegisterLibFunc(&nwPathGetStatus, lib, "nw_path_get_status")
+		purego.RegisterLibFunc(&nwPathIsExpensive, lib, "nw_path_is_expensive")
+		purego.RegisterLibFunc(&nwPathIsConstrained, lib, "nw_path_is_constrained")
+		purego.RegisterLibFunc(&dispatchQueueCreate, purego.RTLD_DEFAULT, "dispatch_queue_create")
+
+		m := nwPathMonitorCreate()
+		if m == 0 {
+			close(networkMonitor.ready)
+			return
 		}
-		networkMonitor.status = status
-		theBackend.h.NetworkChanged(status)
+		first := true
+		// The handler runs on the monitor's serial queue, never on the main
+		// thread, and touches no Objective-C object.
+		blk := newBlock(func(_ objc.Block, path uintptr) {
+			s := platform.NetworkStatus{
+				Online:      nwPathGetStatus(path) == nwPathStatusSatisfied,
+				Constrained: nwPathIsExpensive(path) || nwPathIsConstrained(path),
+			}
+			networkMonitor.mu.Lock()
+			networkMonitor.status = s
+			networkMonitor.mu.Unlock()
+			if first {
+				first = false
+				close(networkMonitor.ready)
+				return
+			}
+			theBackend.post(func() {
+				if networkMonitor.watching {
+					theBackend.h.NetworkChanged(s)
+				}
+			})
+		})
+		// The monitor copies the handler.
+		nwPathMonitorSetUpdateHandler(m, uintptr(blk))
+		blk.Release()
+		label := []byte("mygo.network\x00")
+		nwPathMonitorSetQueue(m, dispatchQueueCreate(&label[0], 0))
+		// The monitor lives as long as the app.
+		nwPathMonitorStart(m)
 	})
-	// The framework keeps the handler, so hand it a copy the block can
-	// outlive its stack frame with, as the window handlers do.
-	nwPathMonitorSetUpdateHandler(m, uintptr(blk.Copy()))
-	nwPathMonitorSetQueue(m, dispatchGetMainQueue)
-	nwPathMonitorStart(m)
-	// The monitor is retained by the framework and lives for the process.
-	// There is no teardown hook that would run early enough to cancel it
-	// safely, and cancelling would need a cancel handler too.
-	networkMonitor.monitor = m
 }

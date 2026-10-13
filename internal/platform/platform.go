@@ -135,8 +135,8 @@ type AppHandler interface {
 	DisplaysChanged()
 	// PowerEvent is "suspend", "resume", "lock-screen" or "unlock-screen".
 	PowerEvent(event string)
-	// NetworkChanged is called when the computer's network state changes,
-	// on the main thread.
+	// NetworkChanged reports the network's status, once Network.Watch was
+	// called, when it may have changed.
 	NetworkChanged(status NetworkStatus)
 	HotkeyPressed(id int)
 	NotificationClicked(id string)
@@ -779,18 +779,16 @@ type Power interface {
 
 // NetworkStatus is the state of the computer's network connection.
 type NetworkStatus struct {
-	// Online reports whether the computer can reach the internet.
-	Online bool
-	// Constrained reports whether the connection is expensive or metered,
-	// so the app should send less, or ask the user before it downloads
-	// something large. It is false where the system does not say.
-	Constrained bool
+	Online      bool
+	Constrained bool // expensive, metered or in a low data mode
 }
 
 // Network reports the state of the computer's network connection.
 type Network interface {
-	// Status returns the current state, read from the system. It runs on
-	// the main thread.
+	// Watch starts reporting AppHandler.NetworkChanged, which may also be
+	// called when the status stayed the same.
+	Watch()
+	// Status returns the current state.
 	Status() NetworkStatus
 }
 

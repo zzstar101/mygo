@@ -219,13 +219,17 @@ mygo.Network.OnChanged(func(s mygo.NetworkStatus) {
 })
 ```
 
-The monitor starts when the app does, so `Status` is ready without any
-setup and `OnChanged` reports later changes. `OnChanged` runs on the main
-thread and returns a function that removes the listener. `Constrained` is
-`nw_path_is_expensive` on macOS, metered on Linux and a variable-cost
-connection on Windows; it is false when the platform cannot tell.
+`Online` means the system has a connection that leads beyond the
+computer, which does not prove that a server answers: macOS and Linux
+count any route out, and Windows asks whether the internet is reachable.
+`Constrained` is an expensive connection or Low Data Mode on macOS, a
+metered one on Linux and a variable-cost one on Windows. In browsers
+`Online` is `navigator.onLine`, and `Constrained` is false. Changes are
+watched from the first `OnChanged` on, whose listener runs on the main
+thread, only when the status changed; it returns a function that removes
+the listener.
 
-Pages already have `navigator.onLine`. To mirror the native status in the
+Pages already have `navigator.onLine`. To show the native status in the
 UI, broadcast a typed event from the listener, so the generated client
 receives it:
 

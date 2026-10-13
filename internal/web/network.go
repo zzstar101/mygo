@@ -2,10 +2,28 @@
 
 package web
 
-import "github.com/egoist/mygo/internal/platform"
+import (
+	"syscall/js"
 
-func (*Backend) Network() platform.Network { return network{} }
+	"github.com/egoist/mygo/internal/platform"
+)
 
-type network struct{}
+func (b *Backend) Network() platform.Network { return network{b} }
 
-func (network) Status() platform.NetworkStatus { return platform.NetworkStatus{} }
+// network is the browser's navigator.onLine, which tells no cost.
+type network struct{ b *Backend }
+
+func (network) Status() platform.NetworkStatus {
+	return platform.NetworkStatus{Online: js.Global().Get("navigator").Get("onLine").Bool()}
+}
+
+// Watch listens to the window's online and offline events.
+func (n network) Watch() {
+	changed := n.b.funcOf(func(js.Value, []js.Value) any {
+		n.b.sync(func() { n.b.h.NetworkChanged(n.Status()) })
+		return nil
+	})
+	for _, event := range []string{"online", "offline"} {
+		js.Global().Call("addEventListener", event, changed)
+	}
+}

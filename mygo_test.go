@@ -1626,12 +1626,6 @@ func TestModules(t *testing.T) {
 	if res, err := Dialog.Message(MessageOptions{Buttons: []string{"OK", "Cancel"}}); err != nil || res.Button != 1 || !res.CheckboxChecked {
 		t.Errorf("Dialog.Message = %+v, %v", res, err)
 	}
-
-	fb.Online, fb.Constrained = true, true
-	if s := Network.Status(); !s.Online || !s.Constrained {
-		t.Errorf("Network.Status = %+v, want online and constrained", s)
-	}
-	fb.Online, fb.Constrained = false, false
 }
 
 // needsAppCalls are the calls that need the running app, which main may

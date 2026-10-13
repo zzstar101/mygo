@@ -590,12 +590,11 @@ func (appHandler) OpenFiles(paths []string) {
 		fire1(&App.onOpenFile, p)
 	}
 }
-func (appHandler) MenuItemClicked(id int)  { menuItemClicked(id, FocusedWindow()) }
-func (appHandler) ThemeChanged()           { updateBackgrounds(); contentThemeChanged(); Theme.changed() }
-func (appHandler) DisplaysChanged()        { Screen.changed() }
-func (appHandler) PowerEvent(event string) { Power.event(event) }
-func (appHandler) NetworkChanged(status platform.NetworkStatus) {
-	Network.changed(networkStatus(status))
-}
+func (appHandler) MenuItemClicked(id int)        { menuItemClicked(id, FocusedWindow()) }
+func (appHandler) ThemeChanged()                 { updateBackgrounds(); contentThemeChanged(); Theme.changed() }
+func (appHandler) DisplaysChanged()              { Screen.changed() }
+func (appHandler) PowerEvent(event string)       { Power.event(event) }
 func (appHandler) HotkeyPressed(id int)          { GlobalShortcut.pressed(id) }
 func (appHandler) NotificationClicked(id string) { notificationClicked(id) }
+
+func (appHandler) NetworkChanged(s platform.NetworkStatus) { Network.changed(networkStatus(s)) }

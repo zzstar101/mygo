@@ -2,27 +2,24 @@ package e2e
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo"
 )
 
-// TestNetwork smoke-tests the network status through the real backend. The
-// monitor is started eagerly in Init, so Status reads a live value and
-// OnChanged fires on later changes; the deterministic behavior (dedup, off,
-// main thread) is covered by the unit tests through internal/fake.
+// TestNetwork reads the network status through the real backend. The
+// computers that run the tests are online (they downloaded the module), so
+// the first Status, which starts the monitor on macOS and waits for its
+// first path, says so. Changes are covered through internal/fake.
 func TestNetwork(t *testing.T) {
-	off := mygo.Network.OnChanged(func(mygo.NetworkStatus) {})
-	defer off()
-
+	start := time.Now()
 	s := mygo.Network.Status()
-	t.Logf("online: %v, constrained: %v", s.Online, s.Constrained)
+	t.Logf("%+v in %v", s, time.Since(start))
 	if !s.Online {
-		t.Log("offline; skipping the online assertions")
-		return
+		t.Errorf("Status = %+v, want online", s)
 	}
-	// The connection is usable; a constrained flag, when present, must not
-	// contradict that.
-	if s.Constrained && !s.Online {
-		t.Error("constrained but not online")
+	mygo.Network.OnChanged(func(mygo.NetworkStatus) {})()
+	if again := mygo.Network.Status(); again != s {
+		t.Logf("the status changed to %+v", again)
 	}
 }

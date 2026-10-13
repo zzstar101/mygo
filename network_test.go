@@ -4,31 +4,49 @@ package mygo
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/internal/platform"
 )
 
 func TestNetwork(t *testing.T) {
+	set := func(online, constrained bool) {
+		onMain(func() { fb.Online, fb.Constrained = online, constrained })
+	}
+	set(true, false)
+	defer set(false, false)
+	if s := Network.Status(); s != (NetworkStatus{Online: true}) {
+		t.Errorf("Status = %+v, want online", s)
+	}
+	set(true, true)
+	if s := Network.Status(); s != (NetworkStatus{Online: true, Constrained: true}) {
+		t.Errorf("Status = %+v, want online and constrained", s)
+	}
+
 	var got []NetworkStatus
 	mainOK := true
 	off := Network.OnChanged(func(s NetworkStatus) {
 		got = append(got, s)
-		if !isMainThread() {
-			mainOK = false
-		}
+		mainOK = mainOK && isMainThread()
 	})
 	defer off()
+	deadline := time.Now().Add(time.Second)
+	for !onMainValue(func() bool { return fb.WatchingNetwork }) {
+		if time.Now().After(deadline) {
+			t.Fatal("the backend was not asked to watch the network")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
-	// The backends keep the status current from Init, so OnChanged fires on
-	// a real change and swallows a duplicate (§2.3).
+	// The status when watching started is the one changes are told from,
+	// and a report that changes nothing calls no listener.
 	onMain(func() {
-		fb.Online = true
-		fb.EmitNetwork(platform.NetworkStatus{Online: true}) // first report
-		fb.EmitNetwork(platform.NetworkStatus{Online: true}) // duplicate: ignored
-		fb.Online = false
-		fb.EmitNetwork(platform.NetworkStatus{Online: false, Constrained: true})
+		fb.EmitNetwork(platform.NetworkStatus{Online: true, Constrained: true})
+		fb.EmitNetwork(platform.NetworkStatus{Online: false})
+		fb.EmitNetwork(platform.NetworkStatus{Online: false})
+		fb.EmitNetwork(platform.NetworkStatus{Online: true})
 	})
-	want := []NetworkStatus{{Online: true}, {Online: false, Constrained: true}}
+	want := []NetworkStatus{{}, {Online: true}}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("changes = %+v, want %+v", got, want)
 	}
@@ -36,24 +54,9 @@ func TestNetwork(t *testing.T) {
 		t.Error("OnChanged did not run on the main thread")
 	}
 
-	// Status reflects the backend's current state.
-	fb.Online = true
-	if s := Network.Status(); !s.Online || s.Constrained {
-		t.Errorf("Status = %+v, want online", s)
-	}
-	fb.Constrained = true
-	if s := Network.Status(); !s.Online || !s.Constrained {
-		t.Errorf("Status = %+v, want online and constrained", s)
-	}
-
-	// off removes the listener: later emits do not reach it.
 	off()
-	onMain(func() {
-		fb.Online = false
-		fb.Constrained = false
-		fb.EmitNetwork(platform.NetworkStatus{})
-	})
+	onMain(func() { fb.EmitNetwork(platform.NetworkStatus{Constrained: true}) })
 	if len(got) != len(want) {
-		t.Errorf("changes after off = %+v, want it unchanged", got)
+		t.Errorf("changes after off = %+v, want %+v", got, want)
 	}
 }

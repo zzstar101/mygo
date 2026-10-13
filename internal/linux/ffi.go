@@ -110,65 +110,69 @@ func mustBind(lib ptr, fn any, name string) {
 
 // GLib, GObject and GIO.
 var (
-	gFree                              func(p ptr)
-	gErrorFree                         func(e ptr)
-	gStrfreev                          func(v ptr)
-	gFilenameFromURI                   func(uri string, hostname, gerr ptr) ptr
-	gErrorNewLiteral                   func(domain uint32, code int32, msg *byte) ptr
-	gQuarkFromString                   func(s *byte) uint32
-	gIdleAddFull                       func(priority int32, fn ptr, data ptr, notify ptr) uint32
-	gTimeoutAdd                        func(ms uint32, fn ptr, data ptr) uint32
-	gMainContextIteration              func(ctx ptr, mayBlock bool) bool
-	gMainContextWakeup                 func(ctx ptr)
-	gMainLoopNew                       func(ctx ptr, running bool) ptr
-	gMainLoopRun                       func(loop ptr)
-	gMainLoopQuit                      func(loop ptr)
-	gMainLoopUnref                     func(loop ptr)
-	gSignalConnectData                 func(instance ptr, signal *byte, handler ptr, data ptr, destroy ptr, flags int32) uint64
-	gSignalHandlerDisconnect           func(instance ptr, id uint64)
-	gObjectRef                         func(obj ptr) ptr
-	gObjectRefSink                     func(obj ptr) ptr
-	gObjectUnref                       func(obj ptr)
-	gObjectSetBool                     func(obj ptr, name *byte, v bool, end ptr)
-	gObjectGetPtr                      func(obj ptr, name *byte, out unsafe.Pointer, end ptr)
-	gSlistFree                         func(list ptr)
-	gListFree                          func(list ptr)
-	gUnixInputStreamNew                func(fd int32, closeFD bool) ptr
-	gInputStreamReadAll                func(stream ptr, buf unsafe.Pointer, count uintptr, read *uintptr, cancellable ptr, err *ptr) bool
-	gAppInfoLaunchDefaultForURI        func(uri *byte, ctx ptr, err *ptr) bool
-	gAppInfoGetDefaultForURIScheme     func(scheme *byte) ptr
-	gAppInfoGetID                      func(info ptr) ptr
-	gFileNewForPath                    func(path *byte) ptr
-	gFileGetURI                        func(file ptr) ptr
-	gFileTrash                         func(file ptr, cancellable ptr, err *ptr) bool
-	gBusGetSync                        func(busType int32, cancellable ptr, err *ptr) ptr
-	gDBusConnectionCallSync            func(conn ptr, name, path, iface, method *byte, params ptr, replyType ptr, flags int32, timeout int32, cancellable ptr, err *ptr) ptr
-	gDBusConnectionSignalSubscribe     func(conn ptr, sender, iface, member, path, arg0 *byte, flags int32, cb ptr, data ptr, free ptr) uint32
-	gVariantNewString                  func(s *byte) ptr
-	gVariantNewUint32                  func(v uint32) ptr
-	gVariantNewInt32                   func(v int32) ptr
-	gVariantNewTuple                   func(children unsafe.Pointer, n uintptr) ptr
-	gVariantNewArray                   func(typ ptr, children unsafe.Pointer, n uintptr) ptr
-	gVariantTypeNew                    func(s *byte) ptr
-	gVariantGetChildValue              func(v ptr, i uintptr) ptr
-	gVariantGetUint32                  func(v ptr) uint32
-	gVariantGetUint64                  func(v ptr) uint64
-	gVariantGetBoolean                 func(v ptr) bool
-	gVariantGetDouble                  func(v ptr) float64
-	gVariantGetString                  func(v ptr, length *uintptr) ptr
-	gVariantUnref                      func(v ptr)
-	gVariantGetVariant                 func(v ptr) ptr
-	gVariantGetTypeString              func(v ptr) ptr
-	gVariantNewBoolean                 func(v bool) ptr
-	gVariantNewDictEntry               func(key, value ptr) ptr
-	gVariantNewVariant                 func(v ptr) ptr
-	gVariantNewDouble                  func(v float64) ptr
-	gVariantNewInt64                   func(v int64) ptr
-	gVariantNewObjectPath              func(s *byte) ptr
-	gVariantLookupValue                func(dict ptr, key *byte, typ ptr) ptr
-	gVariantNChildren                  func(v ptr) uintptr
-	gDBusConnectionEmitSignal          func(conn ptr, dest, path, iface, signal *byte, params ptr, err *ptr) bool
-	gDBusConnectionGetUniqueName       func(conn ptr) ptr
+	gFree                          func(p ptr)
+	gErrorFree                     func(e ptr)
+	gStrfreev                      func(v ptr)
+	gFilenameFromURI               func(uri string, hostname, gerr ptr) ptr
+	gErrorNewLiteral               func(domain uint32, code int32, msg *byte) ptr
+	gQuarkFromString               func(s *byte) uint32
+	gIdleAddFull                   func(priority int32, fn ptr, data ptr, notify ptr) uint32
+	gTimeoutAdd                    func(ms uint32, fn ptr, data ptr) uint32
+	gMainContextIteration          func(ctx ptr, mayBlock bool) bool
+	gMainContextWakeup             func(ctx ptr)
+	gMainLoopNew                   func(ctx ptr, running bool) ptr
+	gMainLoopRun                   func(loop ptr)
+	gMainLoopQuit                  func(loop ptr)
+	gMainLoopUnref                 func(loop ptr)
+	gSignalConnectData             func(instance ptr, signal *byte, handler ptr, data ptr, destroy ptr, flags int32) uint64
+	gSignalHandlerDisconnect       func(instance ptr, id uint64)
+	gObjectRef                     func(obj ptr) ptr
+	gObjectRefSink                 func(obj ptr) ptr
+	gObjectUnref                   func(obj ptr)
+	gObjectSetBool                 func(obj ptr, name *byte, v bool, end ptr)
+	gObjectGetPtr                  func(obj ptr, name *byte, out unsafe.Pointer, end ptr)
+	gSlistFree                     func(list ptr)
+	gListFree                      func(list ptr)
+	gUnixInputStreamNew            func(fd int32, closeFD bool) ptr
+	gInputStreamReadAll            func(stream ptr, buf unsafe.Pointer, count uintptr, read *uintptr, cancellable ptr, err *ptr) bool
+	gAppInfoLaunchDefaultForURI    func(uri *byte, ctx ptr, err *ptr) bool
+	gAppInfoGetDefaultForURIScheme func(scheme *byte) ptr
+	gAppInfoGetID                  func(info ptr) ptr
+	gFileNewForPath                func(path *byte) ptr
+	gFileGetURI                    func(file ptr) ptr
+	gFileTrash                     func(file ptr, cancellable ptr, err *ptr) bool
+	gBusGetSync                    func(busType int32, cancellable ptr, err *ptr) ptr
+	gDBusConnectionCallSync        func(conn ptr, name, path, iface, method *byte, params ptr, replyType ptr, flags int32, timeout int32, cancellable ptr, err *ptr) ptr
+	gDBusConnectionSignalSubscribe func(conn ptr, sender, iface, member, path, arg0 *byte, flags int32, cb ptr, data ptr, free ptr) uint32
+	gVariantNewString              func(s *byte) ptr
+	gVariantNewUint32              func(v uint32) ptr
+	gVariantNewInt32               func(v int32) ptr
+	gVariantNewTuple               func(children unsafe.Pointer, n uintptr) ptr
+	gVariantNewArray               func(typ ptr, children unsafe.Pointer, n uintptr) ptr
+	gVariantTypeNew                func(s *byte) ptr
+	gVariantGetChildValue          func(v ptr, i uintptr) ptr
+	gVariantGetUint32              func(v ptr) uint32
+	gVariantGetUint64              func(v ptr) uint64
+	gVariantGetBoolean             func(v ptr) bool
+	gVariantGetDouble              func(v ptr) float64
+	gVariantGetString              func(v ptr, length *uintptr) ptr
+	gVariantUnref                  func(v ptr)
+	gVariantGetVariant             func(v ptr) ptr
+	gVariantGetTypeString          func(v ptr) ptr
+	gVariantNewBoolean             func(v bool) ptr
+	gVariantNewDictEntry           func(key, value ptr) ptr
+	gVariantNewVariant             func(v ptr) ptr
+	gVariantNewDouble              func(v float64) ptr
+	gVariantNewInt64               func(v int64) ptr
+	gVariantNewObjectPath          func(s *byte) ptr
+	gVariantLookupValue            func(dict ptr, key *byte, typ ptr) ptr
+	gVariantNChildren              func(v ptr) uintptr
+	gDBusConnectionEmitSignal      func(conn ptr, dest, path, iface, signal *byte, params ptr, err *ptr) bool
+	gDBusConnectionGetUniqueName   func(conn ptr) ptr
+)
+
+// GIO's network monitor (network.go).
+var (
 	gNetworkMonitorGetDefault          func() ptr
 	gNetworkMonitorGetNetworkAvailable func(monitor ptr) bool
 	gNetworkMonitorGetNetworkMetered   func(monitor ptr) bool
