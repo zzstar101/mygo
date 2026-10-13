@@ -23,7 +23,7 @@ export function fakeGo(handlers: Record<string, Handler>): { calls: [string, unk
   const calls: [string, unknown[]][] = [];
   const aborts = new Map<number, AbortController>();
   const { runtime, internal } = createRuntime(
-    { platform: "darwin", windowId: 1, version: "0.0.0-test", secret: "s" },
+    { platform: "darwin", windowId: 1, version: "0.0.0-test", secret: "s", locale: "en-US" },
     (raw) => {
       const m = JSON.parse(raw) as Outgoing;
       if (m.t === "chan-close") aborts.get(m.c)?.abort();

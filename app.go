@@ -399,16 +399,18 @@ func (a *Application) SetBadgeCount(n int) {
 }
 
 // Locale returns the locale the app shows: the tag SetLocale set, or the
-// user's preferred locale, e.g. "en-US".
+// user's preferred locale, e.g. "en-US". The pages of web windows read it
+// as mygo.locale.
 func (a *Application) Locale() string {
 	return onMainValue(func() string { return a.localeInEffect() })
 }
 
 // SetLocale makes tag, a language tag such as "zh-Hans" or "zh-Hant-TW",
 // the locale the app shows, from any goroutine: the controls of the native
-// UI say their own texts in its language, and OnLocaleChanged tells the app
-// to say its own in it. An empty tag follows the user's preferred locale
-// again, which is the default.
+// UI say their own texts in its language, the pages of web windows hear the
+// mygo:locale event, and OnLocaleChanged tells the app to say its own in
+// it. An empty tag follows the user's preferred locale again, which is the
+// default.
 func (a *Application) SetLocale(tag string) {
 	tag = strings.TrimSpace(tag)
 	a.mu.Lock()
@@ -419,8 +421,26 @@ func (a *Application) SetLocale(tag string) {
 	a.locale = tag
 	a.mu.Unlock()
 	postMain(func() {
-		contentLocaleChanged()
-		fire1(&a.onLocaleChanged, a.localeInEffect())
+		locale := a.localeInEffect()
+		localeChanged(locale)
+		fire1(&a.onLocaleChanged, locale)
+	})
+}
+
+// localeChangedFromSystem tells the app that the user's preferred locale
+// changed. The app follows it while it shows no locale of its own, set with
+// SetLocale. Main thread only.
+func (a *Application) localeChangedFromSystem() {
+	postMain(func() {
+		a.mu.Lock()
+		own := a.locale != ""
+		a.mu.Unlock()
+		if own {
+			return
+		}
+		locale := a.localeInEffect()
+		localeChanged(locale)
+		fire1(&a.onLocaleChanged, locale)
 	})
 }
 
@@ -643,6 +663,7 @@ func (appHandler) ThemeChanged() {
 	sendPreferences()
 }
 func (appHandler) DisplaysChanged()              { Screen.changed() }
+func (appHandler) LocaleChanged()                { App.localeChangedFromSystem() }
 func (appHandler) PowerEvent(event string)       { Power.event(event) }
 func (appHandler) HotkeyPressed(id int)          { GlobalShortcut.pressed(id) }
 func (appHandler) NotificationClicked(id string) { notificationClicked(id) }

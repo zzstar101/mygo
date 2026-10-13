@@ -54,6 +54,12 @@ export interface Runtime {
   readonly windowId: number;
   /** MyGo version. */
   readonly version: string;
+  /**
+   * The locale the app shows, e.g. "zh-Hans": what `App.SetLocale` set, or
+   * the system's language. It changes with the `mygo:locale` event, whose
+   * payload is the new tag.
+   */
+  readonly locale: string;
   /** The window hosting this page. */
   readonly window: WindowControls;
 }

@@ -84,6 +84,29 @@ export function once<T = unknown>(name: string, listener: (payload: T) => void):
   return runtime().once<T>(name, listener);
 }
 
+/**
+ * The locale the app shows, e.g. "zh-Hans": what `App.SetLocale` set, or the
+ * system's language. Keep the translations of a page in its own i18n and
+ * pick the language with it.
+ */
+export function locale(): string {
+  return runtime().locale;
+}
+
+/**
+ * Subscribes to changes of the locale the app shows, e.g. when the app
+ * switches language, or the system's language changes and the app follows
+ * it. The listener is called with the new tag. Returns a function that
+ * unsubscribes.
+ *
+ * ```ts
+ * onLocaleChange((tag) => show(tag));
+ * ```
+ */
+export function onLocaleChange(listener: (locale: string) => void): () => void {
+  return on<string>("mygo:locale", listener);
+}
+
 /** A typed event sent by the Go side, declared with `mygo.NewEvent`. */
 export interface GoEvent<T> {
   readonly name: string;

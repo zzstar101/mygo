@@ -10,6 +10,8 @@ export interface BridgeConfig {
   version: string;
   /** Prefixes every message, so Go can tell ours from other frames'. */
   secret: string;
+  /** The locale the app shows, e.g. "zh-Hans". */
+  locale: string;
 }
 
 /** Messages posted from the page to Go. */

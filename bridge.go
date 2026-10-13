@@ -26,6 +26,7 @@ func (w *Window) bridgeScript() string {
 		WindowID: w.top().id, // the window a web view is in
 		Version:  Version,
 		Secret:   w.secret,
+		Locale:   App.Locale(),
 	})
 }
 
@@ -154,6 +155,18 @@ func (w *Window) sendTitleBar() {
 	}
 }
 
+// sendLocale tells the pages of a window the locale the app shows. The
+// bridge configuration tells the first page at document start; this keeps
+// the current page, and later ones, up to date. Main thread only.
+func (w *Window) sendLocale() {
+	if w.native == nil {
+		return
+	}
+	if msg, err := encodeEvent(bridge.LocaleEvent, App.Locale()); err == nil {
+		w.deliver(msg)
+	}
+}
+
 // handleMessage routes a message posted by the page bridge. It runs on the
 // main thread.
 func (w *Window) handleMessage(msg string) {
@@ -186,9 +199,10 @@ func (w *Window) handleMessage(msg string) {
 		w.held = nil
 		w.outMu.Unlock()
 		// The script at document start may tell a later page the room of
-		// the controls before a change.
+		// the controls, and the locale, before a change.
 		w.sendTitleBar()
 		w.sendPreferences(Theme.preferences())
+		w.sendLocale()
 		w.flush()
 		fire(&w.onDOMReady)
 		w.readyToShow()

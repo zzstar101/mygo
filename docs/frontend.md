@@ -138,7 +138,9 @@ await currentWindow.toggleMaximize();
 | `Channel` | a stream of values from a Go method, see [channels](bindings.md#channels) |
 | `isCallError(err)` | whether a rejection came from a Go error |
 | `isMyGo()` | whether the page runs in a MyGo window, not in a browser tab of the dev server |
-| `runtime()` | the runtime: `platform` (`"darwin"`, `"linux"` or `"win32"`), `windowId` (the Go window's `ID()`) and `version`; throws outside MyGo |
+| `runtime()` | the runtime: `platform` (`"darwin"`, `"linux"` or `"win32"`), `windowId` (the Go window's `ID()`), `version` and `locale` (the language the app shows, see [languages](i18n.md#the-locale-an-app-shows)); throws outside MyGo |
+| `locale()` | the language the app shows now, such as `"zh-Hans"` |
+| `onLocaleChange(listener)` | calls the listener with the new tag when `App.SetLocale` or the system changes it |
 | `currentWindow` | the page's window: `minimize`, `maximize`, `unmaximize`, `toggleMaximize`, `isMaximized`, `toggleFullScreen`, `close` and `setTitle` |
 | `onFileDrop(listener)` | files dropped on the window, with their paths |
 | `onPreferences(listener)` | the accent color and the accessibility settings of the desktop, and the changes that follow |

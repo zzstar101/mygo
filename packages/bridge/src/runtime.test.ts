@@ -6,8 +6,9 @@ type CallMsg = Extract<Outgoing, { t: "call" }>;
 
 function setup() {
   const sent: Outgoing[] = [];
-  const rt = createRuntime({ platform: "darwin", windowId: 7, version: "0.0.0-test", secret: "s" }, (m) =>
-    sent.push(JSON.parse(m)),
+  const rt = createRuntime(
+    { platform: "darwin", windowId: 7, version: "0.0.0-test", secret: "s", locale: "en-US" },
+    (m) => sent.push(JSON.parse(m)),
   );
   return { sent, ...rt };
 }
@@ -87,6 +88,23 @@ describe("events", () => {
     off1();
     internal.receive({ t: "event", n: "x" });
     expect(n).toBe(3);
+  });
+
+  test("the locale comes from the configuration, then from the event", () => {
+    const { runtime, internal } = setup();
+    expect(runtime.locale).toBe("en-US");
+
+    const seen: string[] = [];
+    runtime.on<string>("mygo:locale", (tag) => seen.push(tag));
+    internal.receive({ t: "event", n: "mygo:locale", p: "zh-Hans" });
+
+    // A listener reads the locale the event announces.
+    expect(seen).toEqual(["zh-Hans"]);
+    expect(runtime.locale).toBe("zh-Hans");
+
+    // A payload that is not a tag changes nothing.
+    internal.receive({ t: "event", n: "mygo:locale", p: 7 });
+    expect(runtime.locale).toBe("zh-Hans");
   });
 });
 

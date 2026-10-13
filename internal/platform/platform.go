@@ -138,6 +138,9 @@ type AppHandler interface {
 	MenuItemClicked(id int)
 	ThemeChanged()
 	DisplaysChanged()
+	// LocaleChanged is called when the user's preferred locale changed, on
+	// the systems that report it.
+	LocaleChanged()
 	// PowerEvent is "suspend", "resume", "lock-screen" or "unlock-screen".
 	PowerEvent(event string)
 	// NetworkChanged reports the network's status, once Network.Watch was

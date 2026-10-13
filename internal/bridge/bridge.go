@@ -21,6 +21,9 @@ type Config struct {
 	Version  string `json:"version"`
 	// Secret prefixes every message the bridge posts.
 	Secret string `json:"secret"`
+	// Locale is the tag of the language the app shows, e.g. "zh-Hans",
+	// which pages read as mygo.locale.
+	Locale string `json:"locale"`
 }
 
 // Script returns the bridge source configured for one window.
@@ -33,6 +36,12 @@ func Script(cfg Config) string {
 // the window controls take. The bridge keeps it in the --mygo-titlebar-*
 // CSS variables.
 const TitleBarEvent = "mygo:title-bar"
+
+// LocaleEvent tells the pages of a window the locale the app shows, as a
+// language tag. The bridge configuration tells the first page at document
+// start; this keeps the current page, and later ones, up to date. Pages
+// subscribe with mygo.on("mygo:locale", …) and read mygo.locale.
+const LocaleEvent = "mygo:locale"
 
 // TitleBar is the payload of TitleBarEvent, in CSS pixels.
 type TitleBar struct {

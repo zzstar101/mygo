@@ -43,6 +43,8 @@ type Backend struct {
 	theme                string
 	prefs                platform.Preferences
 	prefsReads           int
+	// locale is the user's preferred locale, "en-US" when empty.
+	locale string
 	// Watching reports whether power events were asked for, Awake counts the
 	// KeepAwake calls not released yet.
 	Watching bool
@@ -627,8 +629,15 @@ func (app) Bounce(bool) int                           { return 0 }
 func (app) CancelBounce(int)                          {}
 func (app) SetDockIcon([]byte) error                  { return nil }
 func (app) ShowAboutPanel(platform.AboutPanelOptions) {}
-func (app) Locale() string                            { return "en-US" }
-func (app) Package() (platform.PackageInfo, bool)     { return platform.PackageInfo{}, false }
+func (a app) Locale() string {
+	a.b.mu.Lock()
+	defer a.b.mu.Unlock()
+	if a.b.locale == "" {
+		return "en-US"
+	}
+	return a.b.locale
+}
+func (app) Package() (platform.PackageInfo, bool) { return platform.PackageInfo{}, false }
 
 func (a app) RegisterURLScheme(scheme, id, name string) error {
 	a.b.mu.Lock()
@@ -878,6 +887,15 @@ func (b *Backend) PreferenceReads() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.prefsReads
+}
+
+// SetSystemLocale changes the user's preferred locale, as the user does in
+// the system's settings, and reports it.
+func (b *Backend) SetSystemLocale(tag string) {
+	b.mu.Lock()
+	b.locale = tag
+	b.mu.Unlock()
+	b.h.LocaleChanged()
 }
 
 type tray struct{}

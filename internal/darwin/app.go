@@ -127,6 +127,9 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 		uintptr(nsString("NSSystemColorsDidChangeNotification")), 0)
 	send(send(workspace(), "notificationCenter"), "addObserver:selector:name:object:", uintptr(b.delegate), uintptr(sel("preferencesChanged:")),
 		uintptr(nsString("NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification")), 0)
+	// The language and region the user prefers.
+	send(center, "addObserver:selector:name:object:", uintptr(b.delegate), uintptr(sel("localeChanged:")),
+		uintptr(nsString("NSCurrentLocaleDidChangeNotification")), 0)
 	return nil
 }
 
@@ -341,6 +344,9 @@ func registerAppDelegate() {
 		}),
 		method("preferencesChanged:", func(self id, _ objc.SEL, n id) {
 			theBackend.h.ThemeChanged()
+		}),
+		method("localeChanged:", func(self id, _ objc.SEL, n id) {
+			theBackend.h.LocaleChanged()
 		}),
 	})
 }

@@ -6,8 +6,10 @@ import {
   event,
   isCallError,
   isMyGo,
+  locale,
   on,
   onFileDrop,
+  onLocaleChange,
   onPreferences,
   runtime,
   type FileDrop,
@@ -42,6 +44,7 @@ const fake: Runtime = {
   platform: "darwin",
   windowId: 1,
   version: "0.1.0",
+  locale: "en-US",
   window: {
     minimize: () => fake.call("mygo:window.Minimize"),
     maximize: () => fake.call("mygo:window.Maximize"),
@@ -118,4 +121,17 @@ test("onPreferences", () => {
   expect(got).toEqual([preferences]);
   off();
   expect(listeners.has("mygo:preferences")).toBe(false);
+});
+
+test("locale and onLocaleChange", () => {
+  expect(() => locale()).toThrow("runtime not found");
+  (globalThis as { mygo?: Runtime }).mygo = fake;
+  expect(locale()).toBe("en-US");
+
+  const got: string[] = [];
+  const off = onLocaleChange((tag) => got.push(tag));
+  listeners.get("mygo:locale")?.("zh-Hans");
+  expect(got).toEqual(["zh-Hans"]);
+  off();
+  expect(listeners.has("mygo:locale")).toBe(false);
 });

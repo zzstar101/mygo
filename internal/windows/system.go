@@ -390,6 +390,8 @@ const (
 	textScaleFactor           = "TextScaleFactor"
 	settingImmersiveColorSet  = "ImmersiveColorSet"
 	settingWindowMetrics      = "WindowMetrics"
+	// settingIntl is the lParam of WM_SETTINGCHANGE when the locale changed.
+	settingIntl = "intl"
 )
 
 // highContrast is HIGHCONTRASTW.

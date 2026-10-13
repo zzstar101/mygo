@@ -333,6 +333,8 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 		case lp != 0 && wstr(lp) == settingImmersiveColorSet:
 			b.applyTheme()
 			b.h.ThemeChanged()
+		case lp != 0 && wstr(lp) == settingIntl:
+			b.h.LocaleChanged()
 		case preferencesChanged(wp, lp):
 			b.h.ThemeChanged()
 		}

@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/egoist/mygo/internal/bridge"
 	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/surface"
 	"github.com/egoist/mygo/transfer"
@@ -293,10 +294,32 @@ func contentThemeChanged() {
 	}
 }
 
-// contentLocaleChanged tells the Contents of the windows that the locale
-// the app shows changed. Main thread only.
-func contentLocaleChanged() {
+// localeChanged tells every window that the locale the app shows changed:
+// its pages hear the mygo:locale event, and a window showing native UI
+// builds its Content anew, with the texts of the language. Main thread
+// only.
+func localeChanged(locale string) {
+	msg, err := encodeEvent(bridge.LocaleEvent, locale)
+	if err != nil {
+		return
+	}
 	for _, w := range Windows() {
 		w.contentChanged()
+		w.deliver(msg)
 	}
+}
+
+// deliver hands a message to the pages of a window: its own page, or the
+// web views it shows native UI in. Main thread only.
+func (w *Window) deliver(msg message) {
+	if w.content != nil {
+		windows.Lock()
+		views := append([]*Window(nil), w.webViews...)
+		windows.Unlock()
+		for _, v := range views {
+			v.enqueue(msg, true)
+		}
+		return
+	}
+	w.enqueue(msg, true)
 }

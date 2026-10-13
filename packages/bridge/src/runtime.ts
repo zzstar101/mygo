@@ -60,6 +60,9 @@ export function createRuntime(
   const channels = new Map<number, ChannelState>();
   const states = new WeakMap<object, ChannelState>();
   let channelSeq = 0;
+  // The locale the app shows: the configuration tells it at document start,
+  // and the mygo:locale event keeps it up to date.
+  let locale = config.locale;
 
   const send = (message: Outgoing) => post(JSON.stringify(message));
 
@@ -227,6 +230,8 @@ export function createRuntime(
     receive(messages) {
       for (const msg of Array.isArray(messages) ? messages : [messages]) {
         if (msg.t === "event") {
+          // The locale listeners read is the one the event tells them.
+          if (msg.n === "mygo:locale" && typeof msg.p === "string") locale = msg.p;
           const set = listeners.get(msg.n);
           if (!set) continue;
           for (const listener of [...set]) {
@@ -267,6 +272,9 @@ export function createRuntime(
     platform: config.platform,
     windowId: config.windowId,
     version: config.version,
+    get locale() {
+      return locale;
+    },
     window: Object.freeze({
       minimize: win("Minimize"),
       maximize: win("Maximize"),
