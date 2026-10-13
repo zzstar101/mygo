@@ -1,6 +1,7 @@
 package vt
 
 import (
+	"bytes"
 	"errors"
 	"runtime"
 	"strings"
@@ -16,6 +17,30 @@ type Terminal struct {
 	// Effects are called during Write, on its goroutine; they must not
 	// call Write.
 	effects Effects
+	// silent is set while a clipboard read goes unanswered: the refusal
+	// the library writes for it is dropped.
+	silent bool
+}
+
+// ClipboardRead is a program's request to read the clipboard.
+type ClipboardRead struct {
+	// Mimes are the types asked for, in order of preference; List asks
+	// for the types available.
+	Mimes []string
+	List  bool
+	// Primary is the selection clipboard of X11.
+	Primary bool
+	// Granted tells that the program holds the terminal's permission, as
+	// when it reads what a paste offered it.
+	Granted bool
+}
+
+// ClipboardReply answers a ClipboardRead: Contents by MIME type, of the
+// types asked for, and Available when the list was asked for. Without
+// contents the read is refused.
+type ClipboardReply struct {
+	Contents  map[string][]byte
+	Available []string
 }
 
 // Effects are what a terminal asks of its embedder while it processes
@@ -35,6 +60,13 @@ type Effects struct {
 	// Clipboard writes text to the clipboard (OSC 52), and reports
 	// whether it did. primary is the selection clipboard of X11.
 	Clipboard func(text string, primary bool) bool
+	// ClipboardRead answers a program's read of the clipboard (OSC 52
+	// with "?", the Kitty clipboard protocol's OSC 5522): the contents of
+	// the MIME types asked for, and the types available when the program
+	// asks for the list. With answer false the program gets no reply at
+	// all, as from a terminal that is not the one to answer; a reply
+	// with no contents refuses it (EPERM).
+	ClipboardRead func(req ClipboardRead) (reply ClipboardReply, answer bool)
 	// Size reports the size of the screen in cells and of a cell in
 	// pixels, for size reports.
 	Size func() (cols, rows, cellWidth, cellHeight int)
@@ -79,6 +111,7 @@ const (
 	optDefaultCursorBlink  = 23
 	optPwdChanged          = 25
 	optClipboardWrite      = 26
+	optClipboardRead       = 38
 	optScrollbackMaxBytes  = 27
 	optDesktopNotification = 29
 	optProgressReport      = 30
@@ -126,6 +159,7 @@ func NewTerminal(cols, rows int, effects Effects) (*Terminal, error) {
 	t.setValue(optPwdChanged, cbPwdChanged)
 	t.setValue(optRenderHold, cbRenderHold)
 	t.setValue(optClipboardWrite, cbClipboardWrite)
+	t.setValue(optClipboardRead, cbClipboardRead)
 	t.setValue(optSize, cbSize)
 	t.setValue(optColorScheme, cbColorScheme)
 	t.setValue(optDeviceAttributes, cbDeviceAttributes)
@@ -171,6 +205,9 @@ func (t *Terminal) Free() {
 func (t *Terminal) Write(p []byte) {
 	if len(p) > 0 {
 		call(fnTerminalVTWrite, t.h, uintptr(unsafe.Pointer(&p[0])), uintptr(len(p)))
+		// A read that writes no refusal, as OSC 52's, leaves silent set;
+		// it is for that read alone.
+		t.silent = false
 	}
 }
 
@@ -271,8 +308,11 @@ const (
 	ModeFocusEvent     Mode = 1004
 	ModeAltScroll      Mode = 1007
 	ModeBracketedPaste Mode = 2004
-	ModeSyncOutput     Mode = 2026
-	ModeGraphemes      Mode = 2027
+	// ModePasteEvents has a paste tell the program what the clipboard
+	// holds, which it reads itself (the Kitty clipboard protocol).
+	ModePasteEvents Mode = 5522
+	ModeSyncOutput  Mode = 2026
+	ModeGraphemes   Mode = 2027
 )
 
 // Mode reports whether a mode is set.
@@ -502,15 +542,69 @@ func clamp16(v int) int { return max(1, min(v, 0xFFFF)) }
 
 // The callbacks of every terminal, made once: purego's are never freed.
 var (
-	cbWritePTY, cbBell, cbTitleChanged, cbPwdChanged, cbRenderHold, cbClipboardWrite, cbSize,
-	cbColorScheme, cbDeviceAttributes, cbDesktopNotification, cbProgressReport uintptr
+	cbWritePTY, cbBell, cbTitleChanged, cbPwdChanged, cbRenderHold, cbClipboardWrite, cbClipboardRead, cbSize,
+	cbColorScheme, cbDeviceAttributes, cbDesktopNotification, cbProgressReport, cbNoRead uintptr
 )
 
 func makeCallbacks() {
+	// A GhosttyMimeReader for PasteEvent, which the library never calls
+	// (it reads nothing for an event); it gives no data if it did.
+	cbNoRead = newCallback(func(_, _, _, _, _ uintptr) uintptr { return 0 })
 	cbWritePTY = newCallback(func(_, id, data, n uintptr) uintptr {
 		if t := terminalOf(id); t != nil && t.effects.WritePTY != nil && n > 0 {
-			t.effects.WritePTY(unsafe.Slice((*byte)(mem(data)), n))
+			p := unsafe.Slice((*byte)(mem(data)), n)
+			if t.silent && bytes.HasPrefix(p, []byte("\x1b]5522;type=read:status=EPERM")) {
+				// The refusal of a read that goes unanswered: the library
+				// writes it as the read's callback returns without a reply.
+				t.silent = false
+				return 0
+			}
+			t.effects.WritePTY(p)
 		}
+		return 0
+	})
+	cbClipboardRead = newCallback(func(_, id, req uintptr) uintptr {
+		r := (*clipboardRead)(mem(req))
+		t := terminalOf(id)
+		if t == nil || t.effects.ClipboardRead == nil {
+			return 0 // refused by the library
+		}
+		var in ClipboardRead
+		in.List, in.Primary, in.Granted = r.list, r.location != 0, r.granted
+		for _, m := range unsafe.Slice((*cString)(mem(r.mimes)), r.mimesLen) {
+			in.Mimes = append(in.Mimes, goString(m.ptr, m.len))
+		}
+		out, answer := t.effects.ClipboardRead(in)
+		if !answer {
+			t.silent = true
+			return 0
+		}
+		reply := clipboardReadReply{size: unsafe.Sizeof(clipboardReadReply{}), result: 1} // denied
+		var contents []clipboardContent
+		var available []cString
+		var keep [][]byte
+		for _, m := range in.Mimes {
+			if data, ok := out.Contents[m]; ok && len(data) > 0 {
+				contents = append(contents, clipboardContent{mime: cStringOf(m, &keep), data: cBytes(data)})
+			}
+		}
+		for _, m := range out.Available {
+			available = append(available, cStringOf(m, &keep))
+		}
+		if len(contents) > 0 || in.List && len(available) > 0 {
+			reply.result = 0
+			if len(contents) > 0 {
+				reply.contents, reply.contentsLen = uintptr(unsafe.Pointer(&contents[0])), uintptr(len(contents))
+			}
+			if len(available) > 0 {
+				reply.available, reply.availableLen = uintptr(unsafe.Pointer(&available[0])), uintptr(len(available))
+			}
+		}
+		call(r.reply, req, uintptr(unsafe.Pointer(&reply)))
+		runtime.KeepAlive(keep)
+		runtime.KeepAlive(out)
+		runtime.KeepAlive(contents)
+		runtime.KeepAlive(available)
 		return 0
 	})
 	cbBell = newCallback(func(_, id uintptr) uintptr {
@@ -604,4 +698,24 @@ func makeCallbacks() {
 		}
 		return 0
 	})
+}
+
+// cStringOf points a GhosttyString at a copy of s, kept in keep for as
+// long as the library may read it.
+func cStringOf(s string, keep *[][]byte) cString {
+	if s == "" {
+		return cString{}
+	}
+	b := []byte(s)
+	*keep = append(*keep, b)
+	return cBytes(b)
+}
+
+// cBytes points a GhosttyString at b, which must stay alive and unchanged
+// while the library reads it.
+func cBytes(b []byte) cString {
+	if len(b) == 0 {
+		return cString{}
+	}
+	return cString{ptr: uintptr(unsafe.Pointer(&b[0])), len: uintptr(len(b))}
 }

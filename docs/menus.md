@@ -98,6 +98,9 @@ menu to every window without one of its own, `Window.SetMenu` gives a
 window its own, and windows have none by default. `App.SetMenu(nil)`
 removes the menu.
 
+On Windows, menu bars and menus follow the appearance, light or dark, as
+the title bar does (see [dark mode](frontend.md#dark-mode)).
+
 A window with `AutoHideMenuBar` keeps its menu bar out of sight, and the
 room for the page. Alt pressed alone, or F10, shows the bar with the
 keyboard in it (Windows) or its first menu open (Linux), and the bar hides

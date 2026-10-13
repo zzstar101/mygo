@@ -1209,7 +1209,11 @@ as in Tauri:
   app, inside the bundle on macOS, with each file's size and SHA-256 and
   how to make it: a copy of a file of the old app with the same content
   (at its path, or elsewhere for moved files), else a patch of the file at
-  its path or its own bytes, whichever is smaller. Patches are bsdiff's
+  its path or its own bytes, whichever is smaller. The stapled ticket
+  (`Contents/CodeResources`) is never made from the old app: the archives'
+  bundles are stapled, but the bundle a user copies from the disk image is
+  not, as `buildDMG` staples the app after copying it into the image.
+  Patches are bsdiff's
   (`bsdiff.go`, with the qsufsort suffix array of `suffix.go`), their
   three streams compressed apart so that they are read from the delta
   file in place. `Update.Install` takes the delta whose `from` is the
@@ -3146,6 +3150,7 @@ which npm allows only for packages that exist: the first release uses an
 | global shortcuts | Carbon hot keys | X11: `XGrabKey` on the root window (with Caps/Num Lock variants), key presses from a GDK filter. Wayland: the XDG `GlobalShortcuts` portal (see [Linux](#linux-internallinux)) | `RegisterHotKey` |
 | notifications | UserNotifications, packaged apps only; `Group` is the `threadIdentifier`; the delegate is attached at launch, for the click that launched the app | org.freedesktop.Notifications over D-Bus; no `Group` | notification-area balloons (toasts); no `Group` |
 | notification removal | `removeDeliveredNotificationsWithIdentifiers:`; `ClearNotifications` removes all, earlier runs' too | `CloseNotification` on the bus, for those of this run | hides the balloon, which goes away by itself anyway |
+| secrets | Security.framework generic passwords in the login keychain (`SecItem*`), service and account as keytar | libsecret's `org.freedesktop.Secret.Generic` schema (attributes `service`, `account`), loaded on first use, libsecret 0.19 or later | Credential Manager generic credentials (`CredWriteW`), target `service/account` |
 | vibrancy | all materials, behind pages and native UI | ignored | Windows 11 22H2 Mica, Acrylic, Tabbed, behind pages and native UI, in windows created with a material, which have no menu bar |
 | traffic lights, Dock | yes | ignored | ignored |
 | hidden title bar | AppKit's traffic lights over a full-size content view | GTK's title buttons in header bars over the page, per `gtk-decoration-layout`; none where the Wayland compositor decorates windows | caption buttons drawn in a layered child window, through DirectComposition over a material; snap layouts; a top edge that resizes |

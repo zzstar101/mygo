@@ -139,6 +139,19 @@ func TestMain(m *testing.M) {
 	if err := mygo.Protocol.Handle("app", mux); err != nil {
 		panic(err)
 	}
+	// Another scheme, so another origin than app:// (TestSchemeCORS).
+	assets := http.NewServeMux()
+	assets.HandleFunc("GET /data", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Count", "3")
+		io.WriteString(w, "asset data")
+	})
+	assets.HandleFunc("POST /data", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		fmt.Fprintf(w, "posted:%s", b)
+	})
+	if err := mygo.Protocol.Handle("assets", assets); err != nil {
+		panic(err)
+	}
 	mygo.App.OnWindowAllClosed(func() {})
 	// A window requested from a goroutine before Run waits for the app to
 	// be ready (TestEarlyWindow).
@@ -1120,6 +1133,28 @@ func TestMenuLetters(t *testing.T) {
 	}
 }
 
+// The menu bar, and the line below it, follow the appearance, also when it
+// changes (Windows, where Win32 menus have no dark appearance of their own).
+func TestMenuBarAppearance(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300})
+	prev := mygo.App.Menu()
+	defer mygo.App.SetMenu(prev)
+	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{{Label: "App", Submenu: []*mygo.MenuItem{{Label: "Item"}}}}))
+	if _, _, supported := menuBarColors(w); !supported {
+		t.Skip("the menu bar is not the window's to draw")
+	}
+	defer mygo.Theme.SetSource(mygo.Theme.Source())
+	dark := func(c uint32) bool { return c&0xFF+c>>8&0xFF+c>>16&0xFF < 3*0x60 }
+	for _, source := range []mygo.ThemeSource{mygo.ThemeDark, mygo.ThemeLight, mygo.ThemeDark} {
+		mygo.Theme.SetSource(source)
+		want := source == mygo.ThemeDark
+		eventually(t, fmt.Sprintf("the menu bar and its line %s", source), func() bool {
+			bar, line, _ := menuBarColors(w)
+			return dark(bar) == want && dark(line) == want
+		})
+	}
+}
+
 // Resizing a centered window keeps its position, also when it was
 // resized right before, which GTK has not confirmed yet.
 func TestCenterThenResize(t *testing.T) {
@@ -1581,6 +1616,40 @@ func TestPrintToPDF(t *testing.T) {
 		if math.Abs(width-want[0]) > 2 || math.Abs(height-want[1]) > 2 {
 			t.Errorf("landscape=%v: page size %vx%v, want %v", landscape, width, height, want)
 		}
+	}
+}
+
+// The app's pages may fetch another custom scheme, which is another
+// origin than theirs (on Windows, http://<scheme>.localhost), as they fetch
+// their own; other sites may not.
+func TestSchemeCORS(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200})
+	if err := w.Page().LoadURL("app://localhost/"); err != nil {
+		t.Fatal(err)
+	}
+	origin, data := "app://localhost", "assets://localhost/data"
+	if runtime.GOOS == "windows" { // how WebView2 serves custom schemes
+		origin, data = "http://app.localhost", "http://assets.localhost/data"
+	}
+	// The origin too: right after LoadURL, the previous document may still
+	// be the one that is complete, and its requests end with it.
+	waitFor(t, w, `location.origin === "`+origin+`" && document.readyState === "complete"`)
+	get := `const r = await fetch("` + data + `"); return (await r.text()) + "|" + r.headers.get("X-Count")`
+	if got, err := mygo.EvalAs[string](w.Page(), get); err != nil || got != "asset data|3" {
+		t.Errorf("GET from the app: %q, %v", got, err)
+	}
+	// A JSON body makes the request go through a preflight.
+	post := `const r = await fetch("` + data + `", {method: "POST", headers: {"Content-Type": "application/json"}, body: '{"n":1}'}); return r.text()`
+	if got, err := mygo.EvalAs[string](w.Page(), post); err != nil || got != `posted:{"n":1}` {
+		t.Errorf("POST from the app: %q, %v", got, err)
+	}
+
+	other := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200})
+	other.Page().LoadHTML("<p>another site</p>", "https://example.com/")
+	waitFor(t, other, `document.readyState === "complete" && location.origin === "https://example.com"`)
+	blocked := `try { await fetch("` + data + `"); return "read" } catch (e) { return "blocked" }`
+	if got, err := mygo.EvalAs[string](other.Page(), blocked); err != nil || got != "blocked" {
+		t.Errorf("another site: %q, %v", got, err)
 	}
 }
 

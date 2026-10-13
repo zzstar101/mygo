@@ -65,7 +65,9 @@ The terminal does what terminal apps do:
   cursor;
 - mouse reports, focus reports, bracketed paste, synchronized output,
   hyperlinks (OSC 8), the title (OSC 0 and 2), the working directory
-  (OSC 7) and copying to the clipboard (OSC 52).
+  (OSC 7), copying to the clipboard (OSC 52), and paste events of the
+  Kitty clipboard protocol (OSC 5522, mode 5522), which let programs take
+  pasted images.
 
 ## Using it
 
@@ -77,7 +79,15 @@ The terminal does what terminal apps do:
   menu's roles also send, and Control+Shift+C and Control+Shift+V
   elsewhere. Pastes are bracketed when the program asks, so that pasted
   lines do not run as commands. The context menu has Copy, Paste, Select
-  All and Clear Scrollback.
+  All and Clear Scrollback. Options add copying on select and Windows'
+  keys (see [Options](#options)).
+- **Pasting images**: a program that reads the clipboard itself, as it
+  asks with mode 5522 (as coding agents that accept images do), is told
+  what a paste holds, the text and an image as PNG, and reads what it
+  wants, even over SSH. Only the terminal that pasted answers its read,
+  with what the clipboard held at the paste; other terminals showing the
+  same program, as other windows on a session, stay silent. Other
+  programs get the text alone, and an image alone pastes nothing.
 - **Scrolling**: the wheel and the touchpad scroll the scrollback, as do
   Shift+Page Up and Shift+Page Down. Full-screen programs get the wheel as
   arrow keys, or as mouse reports when they take the mouse. Typing scrolls
@@ -130,6 +140,15 @@ term, err := terminal.New(terminal.Options{
   background color of their own still draw it.
 - `OptionAsAlt` makes Option on macOS the Alt key of programs (Meta),
   instead of the key typing accented letters.
+- `CopyOnSelect` copies the selection to the clipboard as the pointer
+  ends it, as Ghostty's `copy-on-select`.
+- `CtrlCCopies`, `CtrlVPastes` and `InsertKeys` add the keys of Windows
+  Terminal, outside macOS: Control+C copies the selection and lets go of
+  it, and still interrupts the program when nothing is selected;
+  Control+V pastes; Control+Insert copies and Shift+Insert pastes.
+  `RightClickPastes` makes a secondary click copy the selection, or paste
+  when there is none, instead of showing the context menu. A program
+  that takes the mouse still gets the click.
 - `OnTitle`, `OnExit`, `OnBell` and `OnNotify` run on a goroutine of the
   terminal when the program sets the title, ends, rings the bell or asks
   for a desktop notification. `Done` is closed once the program exited,
@@ -148,6 +167,14 @@ term, err := terminal.New(terminal.Options{
   image), and takes it by returning true: nothing is pasted. An app
   driving a remote shell uploads the clipboard's files this way and
   pastes their remote paths instead.
+- `OnPasteStatus` tells how a paste to a program that reads the clipboard
+  itself goes, on a goroutine of the terminal: `PasteOffered`, then
+  `PasteSending` with the bytes sent of the total as the program reads,
+  then `PasteSent`; or `PasteNotTaken` when the program does not read
+  within 3 seconds, or `PasteUnsupported` when the clipboard holds only an
+  image and the program does not read the clipboard. An app shows a large
+  image's progress over a slow link this way, and says why nothing
+  pasted.
 - `OnKey` sees a key press on the main thread before the terminal sends
   it, and takes it by returning true: neither the key nor the text it
   types reaches the program. Unlike a `Shortcut` around the view, which
@@ -162,6 +189,11 @@ term, err := terminal.New(terminal.Options{
   screen (alternate scroll, which `\x1b[?1007l` turns off). A `Conn`
   whose history lives at the other end, as a remote multiplexer streaming
   only its screen, sends the wheel there this way.
+- `OnZoom` takes the wheel with Control held (Command on macOS) on the
+  main thread, before `OnScroll` and a program that takes the mouse: it
+  gets how many notches, rolling up positive, as an app that sizes its
+  text by the wheel wants. A wheel's event is a notch; a trackpad's moves
+  add up to them.
 
 ## Fonts
 
@@ -252,6 +284,9 @@ selection-foreground = #1e1e2e
 The terminal's methods are safe from any goroutine:
 
 - `Send` sends bytes to the program as if typed, and `Paste` pastes text.
+  `PasteClipboard` pastes contents by MIME type, as the paste keys do: to
+  a program that reads the clipboard itself, all of them, else the
+  `text/plain` one.
 - `Feed` shows bytes as if the program wrote them, text and escape
   sequences.
 - `Title`, `Dir` (the directory the shell reported), `Size` (in cells) and

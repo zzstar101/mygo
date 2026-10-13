@@ -451,3 +451,38 @@ func popupLabels(h uintptr) []string {
 	}
 	return labels
 }
+
+var (
+	procPrintWindow            = user32.NewProc("PrintWindow")
+	procGetPixel               = gdi32.NewProc("GetPixel")
+	procCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
+)
+
+// TestMenuBarColors draws a window as it shows and returns the colors, as
+// COLORREFs, of its menu bar past the last item and of the line below it.
+func TestMenuBarColors(hwnd uintptr) (bar, line uint32, ok bool) {
+	w := theBackend.windows[hwnd]
+	if w == nil {
+		return 0, 0, false
+	}
+	r, ok := w.menuBarRect()
+	if !ok {
+		return 0, 0, false
+	}
+	var wr rect
+	procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&wr)))
+	screen, _, _ := procGetDC.Call(0)
+	defer procReleaseDC.Call(0, screen)
+	dc, _, _ := procCreateCompatibleDC.Call(screen)
+	defer procDeleteDC.Call(dc)
+	bmp, _, _ := procCreateCompatibleBitmap.Call(screen, uintptr(wr.Right-wr.Left), uintptr(wr.Bottom-wr.Top))
+	defer procDeleteObject.Call(bmp)
+	old, _, _ := procSelectObject.Call(dc, bmp)
+	defer procSelectObject.Call(dc, old)
+	const pwRenderFullContent = 2
+	procPrintWindow.Call(hwnd, dc, pwRenderFullContent)
+	x := uintptr(r.Right - 4)
+	b, _, _ := procGetPixel.Call(dc, x, uintptr((r.Top+r.Bottom)/2))
+	l, _, _ := procGetPixel.Call(dc, x, uintptr(r.Bottom))
+	return uint32(b), uint32(l), true
+}

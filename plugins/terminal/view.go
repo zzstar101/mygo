@@ -105,8 +105,14 @@ type view struct {
 	// does not open.
 	opening     string
 	openingPath bool
-	scrolled    float32 // scrolling not yet a whole row
-	ticking     bool    // an autoscroll tick is due
+	// copying is the selection a release ended with Options.CopyOnSelect,
+	// and pasting a secondary click's copy-or-paste, done once t.mu is
+	// released, as opening is.
+	copying  string
+	pasting  bool
+	scrolled float32 // scrolling not yet a whole row
+	zoomed   float32 // wheel with the zoom modifier not yet a notch
+	ticking  bool    // an autoscroll tick is due
 }
 
 type pendingKey struct {
@@ -270,6 +276,19 @@ func (v *view) input(ev ui.InputEvent) bool {
 				v.services.OpenURL(link)
 			}
 		}
+		if text := v.copying; text != "" {
+			// Outside pointerEvent's lock, which the clipboard may hold
+			// up while another program has it.
+			v.copying = ""
+			v.services.WriteClipboard(text)
+		}
+		if v.pasting {
+			// Outside pointerEvent's lock, which copying and pasting take.
+			v.pasting = false
+			if !v.copySelected() {
+				v.paste()
+			}
+		}
 		return took
 	case ui.InputScroll:
 		return v.scroll(ev)
@@ -296,6 +315,17 @@ func (v *view) keyDown(ev ui.InputEvent) bool {
 		return true
 	case mods == copyMods && key == ui.KeyV:
 		v.paste()
+		return true
+	case !mac && t.opts.InsertKeys && mods == ui.Ctrl && key == ui.KeyInsert:
+		v.copy()
+		return true
+	case !mac && t.opts.InsertKeys && mods == ui.Shift && key == ui.KeyInsert:
+		v.paste()
+		return true
+	case !mac && t.opts.CtrlVPastes && mods == ui.Ctrl && key == ui.KeyV:
+		v.paste()
+		return true
+	case !mac && t.opts.CtrlCCopies && mods == ui.Ctrl && key == ui.KeyC && v.copySelected():
 		return true
 	case mods == ui.Shift && (key == ui.KeyPageUp || key == ui.KeyPageDown) && v.scrollPage(key == ui.KeyPageUp):
 		return true
@@ -477,13 +507,45 @@ func (v *view) copy() {
 	}
 }
 
+// copySelected copies the selection and lets go of it, so that the next
+// Control-C interrupts, and reports whether there was one.
+func (v *view) copySelected() bool {
+	t := v.t
+	t.mu.Lock()
+	text, ok := "", false
+	if t.term != nil {
+		if text, ok = t.term.SelectionText(); ok && text != "" {
+			t.term.SetSelection(nil)
+		}
+	}
+	t.mu.Unlock()
+	if !ok || text == "" {
+		return false
+	}
+	v.services.WriteClipboard(text)
+	v.services.Invalidate()
+	return true
+}
+
 func (v *view) paste() {
 	text := v.services.ReadClipboard()
 	if on := v.t.opts.OnPaste; on != nil && on(text) {
 		return
 	}
+	contents := map[string][]byte{}
 	if text != "" {
-		v.t.Paste(text)
+		contents["text/plain"] = []byte(text)
+	}
+	// The image too, for a program that reads the clipboard itself (mode
+	// 5522), or to tell that only an image was there; others get the text,
+	// without encoding an image on the main thread for nothing.
+	if text == "" || v.t.readsClipboard() {
+		if png := v.services.ReadClipboardImage(); len(png) > 0 {
+			contents["image/png"] = png
+		}
+	}
+	if len(contents) > 0 {
+		v.t.PasteClipboard(contents)
 	}
 }
 
@@ -552,6 +614,12 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 	px, py := float64(ev.X*v.scale), float64(ev.Y*v.scale)
 	switch ev.Kind {
 	case ui.InputPointerDown:
+		if ev.Button == 1 && t.opts.RightClickPastes {
+			// As Windows Terminal: copy what is selected, else paste;
+			// input does it once the lock is released.
+			v.pasting = true
+			return true
+		}
 		if ev.Button != 0 {
 			return false // the context menu
 		}
@@ -589,6 +657,11 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 			v.gesture.Release(t.term, &ref)
 		} else {
 			v.gesture.Release(t.term, nil)
+		}
+		if t.opts.CopyOnSelect {
+			if text, ok := t.term.SelectionText(); ok {
+				v.copying = text
+			}
 		}
 		return true
 	}
@@ -687,6 +760,26 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 	t := v.t
 	if v.cellH == 0 {
 		return false
+	}
+	if on := t.opts.OnZoom; on != nil && ev.Mods&ui.Cmd != 0 {
+		// Rolling up is a step up. DY is the scroll offset's change, so up
+		// comes negative; a wheel's event is a notch, a trackpad's many
+		// small moves, which add up to a step by 40.
+		if !ev.Precise {
+			switch {
+			case ev.DY < 0:
+				on(1)
+			case ev.DY > 0:
+				on(-1)
+			}
+			return true
+		}
+		v.zoomed -= ev.DY
+		if steps := int(v.zoomed / 40); steps != 0 {
+			v.zoomed -= float32(steps) * 40
+			on(steps)
+		}
+		return true
 	}
 	ch := float32(v.cellH) / v.scale
 	dy := ev.DY

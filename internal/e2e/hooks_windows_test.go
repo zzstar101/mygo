@@ -153,6 +153,13 @@ func pressTitleButton(w *mygo.Window, name string) (ok bool) {
 	return ok
 }
 
+// menuBarColors returns the colors of a window's menu bar and of the line
+// below it, as 0xBBGGRR.
+func menuBarColors(w *mygo.Window) (bar, line uint32, supported bool) {
+	mygo.RunOnMain(func() { bar, line, supported = win.TestMenuBarColors(w.NativeHandle()) })
+	return bar, line, supported
+}
+
 // topNonClient returns how many pixels at the top of a window are not its
 // page's, and how many a hidden title bar keeps there.
 func topNonClient(w *mygo.Window) (px, want int32, supported bool) {

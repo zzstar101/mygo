@@ -41,6 +41,7 @@ func (*Backend) Screen() platform.Screen                                    { re
 func (*Backend) Theme() platform.Theme                                      { return theme{} }
 func (*Backend) Power() platform.Power                                      { return power{} }
 func (*Backend) Network() platform.Network                                  { return network{} }
+func (*Backend) Secrets() platform.Secrets                                  { return secrets{} }
 func (*Backend) NewTray(platform.TrayHandler) (platform.Tray, error)        { return nil, errUnsupported }
 func (*Backend) RegisterHotkey(int, string) error                           { return errUnsupported }
 func (*Backend) UnregisterHotkey(int)                                       {}
@@ -141,3 +142,9 @@ func (power) IdleTime() time.Duration       { return 0 }
 type network struct{}
 
 func (network) Status() platform.NetworkStatus { return platform.NetworkStatus{} }
+
+type secrets struct{}
+
+func (secrets) SetSecret(string, string, []byte) error { return platform.ErrUnsupported }
+func (secrets) Secret(string, string) ([]byte, error)  { return nil, platform.ErrUnsupported }
+func (secrets) DeleteSecret(string, string) error      { return platform.ErrUnsupported }

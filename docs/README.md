@@ -86,8 +86,8 @@ that must start instantly.
 - [Menus and the tray](menus.md): application, context and Dock menus,
   keyboard shortcuts and tray icons.
 - [Desktop APIs](native.md): dialogs, notifications, the clipboard, the
-  shell, displays, dark mode, power, the network status and global
-  shortcuts.
+  shell, displays, dark mode, power, the network status, secrets and
+  global shortcuts.
 - [Clipboard and drag data](data-transfer.md): multiple representations,
   file lists, custom formats, lazy providers, and clipboard persistence.
 - [Audio](audio.md): sound effects, streamed music and sound an app makes
