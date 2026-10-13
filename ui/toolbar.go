@@ -30,7 +30,7 @@ type toolbarItem struct {
 //	}).Label("Format")
 func coreToolbar(c *context, fn func()) *node {
 	t := c.theme
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	tb := coreRow(c).AlignItems(Center).Gap(t.Space(1)).Padding(t.Space(1)).MinWidth(0)
 	tb.widget, tb.role = "Toolbar", RoleToolbar
 	tb.FocusGroup(Horizontal)

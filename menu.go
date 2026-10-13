@@ -111,6 +111,10 @@ type MenuItem struct {
 	uid    int
 	parent *Menu
 	sub    *Menu
+	// roleLabel is the label the item took from its role, which it keeps
+	// in the language of the locale the app shows while the app gives it
+	// none of its own.
+	roleLabel string
 }
 
 // Menu is a list of menu items used as application menu, window menu,
@@ -338,7 +342,7 @@ func prepareItem(it *MenuItem, parent *Menu) *MenuItem {
 	if it.Role != "" {
 		label, accel := roleDefaults(it.Role)
 		if it.Label == "" {
-			it.Label = label
+			it.Label, it.roleLabel = label, label
 		}
 		if it.Accelerator == "" {
 			it.Accelerator = accel
@@ -565,143 +569,144 @@ var macOnlyRoles = map[MenuRole]bool{
 func roleDefaults(r MenuRole) (label, accel string) {
 	mac := runtime.GOOS == "darwin"
 	name := App.Name()
+	tx := roleTexts()
 	switch r {
 	case RoleUndo:
-		return "Undo", "CmdOrCtrl+Z"
+		return tx.Undo, "CmdOrCtrl+Z"
 	case RoleRedo:
 		if runtime.GOOS == "windows" {
-			return "Redo", "Ctrl+Y"
+			return tx.Redo, "Ctrl+Y"
 		}
-		return "Redo", "Shift+CmdOrCtrl+Z"
+		return tx.Redo, "Shift+CmdOrCtrl+Z"
 	case RoleCut:
-		return "Cut", "CmdOrCtrl+X"
+		return tx.Cut, "CmdOrCtrl+X"
 	case RoleCopy:
-		return "Copy", "CmdOrCtrl+C"
+		return tx.Copy, "CmdOrCtrl+C"
 	case RolePaste:
-		return "Paste", "CmdOrCtrl+V"
+		return tx.Paste, "CmdOrCtrl+V"
 	case RolePasteAndMatchStyle:
-		return "Paste and Match Style", "Shift+Alt+CmdOrCtrl+V"
+		return tx.PasteAndMatchStyle, "Shift+Alt+CmdOrCtrl+V"
 	case RoleDelete:
-		return "Delete", ""
+		return tx.Delete, ""
 	case RoleSelectAll:
-		return "Select All", "CmdOrCtrl+A"
+		return tx.SelectAll, "CmdOrCtrl+A"
 	case RoleReload:
-		return "Reload", "CmdOrCtrl+R"
+		return tx.Reload, "CmdOrCtrl+R"
 	case RoleForceReload:
-		return "Force Reload", "Shift+CmdOrCtrl+R"
+		return tx.ForceReload, "Shift+CmdOrCtrl+R"
 	case RoleToggleDevTools:
 		if mac {
-			return "Toggle Developer Tools", "Alt+Cmd+I"
+			return tx.ToggleDevTools, "Alt+Cmd+I"
 		}
-		return "Toggle Developer Tools", "Ctrl+Shift+I"
+		return tx.ToggleDevTools, "Ctrl+Shift+I"
 	case RoleResetZoom:
-		return "Actual Size", "CmdOrCtrl+0"
+		return tx.ActualSize, "CmdOrCtrl+0"
 	case RoleZoomIn:
-		return "Zoom In", "CmdOrCtrl+Plus"
+		return tx.ZoomIn, "CmdOrCtrl+Plus"
 	case RoleZoomOut:
-		return "Zoom Out", "CmdOrCtrl+-"
+		return tx.ZoomOut, "CmdOrCtrl+-"
 	case RoleToggleFullScreen:
 		if mac {
-			return "Toggle Full Screen", "Ctrl+Cmd+F"
+			return tx.ToggleFullScreen, "Ctrl+Cmd+F"
 		}
-		return "Toggle Full Screen", "F11"
+		return tx.ToggleFullScreen, "F11"
 	case RoleMinimize:
-		return "Minimize", "CmdOrCtrl+M"
+		return tx.Minimize, "CmdOrCtrl+M"
 	case RoleZoom:
-		return "Zoom", ""
+		return tx.Zoom, ""
 	case RoleClose:
 		if hasDocuments() {
-			return "Close", "CmdOrCtrl+W"
+			return tx.Close, "CmdOrCtrl+W"
 		}
-		return "Close Window", "CmdOrCtrl+W"
+		return tx.CloseWindow, "CmdOrCtrl+W"
 	case RoleNew:
-		return "New", "CmdOrCtrl+N"
+		return tx.New, "CmdOrCtrl+N"
 	case RoleOpen:
-		return "Open…", "CmdOrCtrl+O"
+		return tx.Open, "CmdOrCtrl+O"
 	case RoleOpenRecent:
-		return "Open Recent", ""
+		return tx.OpenRecent, ""
 	case RoleSave:
-		return "Save", "CmdOrCtrl+S"
+		return tx.Save, "CmdOrCtrl+S"
 	case RoleSaveAs:
 		if mac {
-			return "Save As…", "Alt+Shift+Cmd+S"
+			return tx.SaveAs, "Alt+Shift+Cmd+S"
 		}
-		return "Save As…", "Ctrl+Shift+S"
+		return tx.SaveAs, "Ctrl+Shift+S"
 	case RoleDuplicate:
 		if mac {
-			return "Duplicate", "Shift+Cmd+S"
+			return tx.Duplicate, "Shift+Cmd+S"
 		}
-		return "Duplicate", ""
+		return tx.Duplicate, ""
 	case RoleRename:
-		return "Rename…", ""
+		return tx.Rename, ""
 	case RoleMoveTo:
-		return "Move To…", ""
+		return tx.MoveTo, ""
 	case RoleRevert:
 		if mac {
-			return "Revert to Saved", ""
+			return tx.RevertToSaved, ""
 		}
-		return "Revert", ""
+		return tx.Revert, ""
 	case RoleQuit:
 		if mac {
-			return "Quit " + name, "Cmd+Q"
+			return tx.QuitApp(name), "Cmd+Q"
 		}
 		if runtime.GOOS == "windows" {
-			return "Exit", ""
+			return tx.Exit, ""
 		}
-		return "Quit", "Ctrl+Q"
+		return tx.Quit, "Ctrl+Q"
 	case RoleAbout:
-		return "About " + name, ""
+		return tx.About(name), ""
 	case RoleHide:
-		return "Hide " + name, "Cmd+H"
+		return tx.Hide(name), "Cmd+H"
 	case RoleHideOthers:
-		return "Hide Others", "Alt+Cmd+H"
+		return tx.HideOthers, "Alt+Cmd+H"
 	case RoleUnhide:
-		return "Show All", ""
+		return tx.ShowAll, ""
 	case RoleFront:
-		return "Bring All to Front", ""
+		return tx.BringAllToFront, ""
 	case RoleServices:
-		return "Services", ""
+		return tx.Services, ""
 	case RoleStartSpeaking:
-		return "Start Speaking", ""
+		return tx.StartSpeaking, ""
 	case RoleStopSpeaking:
-		return "Stop Speaking", ""
+		return tx.StopSpeaking, ""
 	case RoleWindow, RoleWindowMenu:
-		return "Window", ""
+		return tx.Window, ""
 	case RoleHelp:
-		return "Help", ""
+		return tx.Help, ""
 	case RoleAppMenu:
 		return name, ""
 	case RoleFileMenu:
-		return "File", ""
+		return tx.File, ""
 	case RoleEditMenu:
-		return "Edit", ""
+		return tx.Edit, ""
 	case RoleViewMenu:
-		return "View", ""
+		return tx.View, ""
 	case RoleFormatMenu:
-		return "Format", ""
+		return tx.Format, ""
 	case RoleBold:
-		return "Bold", "CmdOrCtrl+B"
+		return tx.Bold, "CmdOrCtrl+B"
 	case RoleItalic:
-		return "Italic", "CmdOrCtrl+I"
+		return tx.Italic, "CmdOrCtrl+I"
 	case RoleUnderline:
-		return "Underline", "CmdOrCtrl+U"
+		return tx.Underline, "CmdOrCtrl+U"
 	case RoleStrikethrough:
-		return "Strikethrough", "Shift+CmdOrCtrl+X"
+		return tx.Strikethrough, "Shift+CmdOrCtrl+X"
 	case RoleAlignLeft:
 		if mac {
-			return "Align Left", "Cmd+{"
+			return tx.AlignLeft, "Cmd+{"
 		}
-		return "Align Left", "Ctrl+L"
+		return tx.AlignLeft, "Ctrl+L"
 	case RoleAlignCenter:
 		if mac {
-			return "Center", "Cmd+|"
+			return tx.Center, "Cmd+|"
 		}
-		return "Center", "Ctrl+E"
+		return tx.Center, "Ctrl+E"
 	case RoleAlignRight:
 		if mac {
-			return "Align Right", "Cmd+}"
+			return tx.AlignRight, "Cmd+}"
 		}
-		return "Align Right", "Ctrl+R"
+		return tx.AlignRight, "Ctrl+R"
 	}
 	return string(r), ""
 }

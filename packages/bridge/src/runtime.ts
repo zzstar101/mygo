@@ -230,8 +230,14 @@ export function createRuntime(
     receive(messages) {
       for (const msg of Array.isArray(messages) ? messages : [messages]) {
         if (msg.t === "event") {
-          // The locale listeners read is the one the event tells them.
-          if (msg.n === "mygo:locale" && typeof msg.p === "string") locale = msg.p;
+          if (msg.n === "mygo:locale" && typeof msg.p === "string") {
+            // Go tells a page the locale again as it loads, for one that
+            // started loading as the locale changed: its listeners hear of
+            // a locale the page did not have only. The one they read is the
+            // one the event tells them.
+            if (msg.p === locale) continue;
+            locale = msg.p;
+          }
           const set = listeners.get(msg.n);
           if (!set) continue;
           for (const listener of [...set]) {

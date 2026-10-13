@@ -221,24 +221,7 @@ func (w *window) setUp(controller uintptr) {
 	}
 	w.applyWebViewBackground()
 
-	scripts := o.UserScripts
-	if w.caption != nil {
-		// After the bridge, which it tells.
-		scripts = append(scripts[:len(scripts):len(scripts)], platform.UserScript{Source: w.titleBarScript()})
-	}
-	for _, us := range scripts {
-		src := us.Source
-		if us.AtDocumentEnd {
-			src = "document.readyState===\"loading\"?document.addEventListener(\"DOMContentLoaded\",()=>{\n" + src + "\n},{once:true}):(()=>{\n" + src + "\n})();"
-		}
-		if !us.AllFrames {
-			// Scripts run in every frame unless told otherwise.
-			src = "if(window===window.top){\n" + src + "\n}"
-		}
-		withHandler(func(uintptr, uintptr) {}, func(h uintptr) uintptr {
-			return comCall(w.webview, wvAddScriptToExecuteOnDocumentCreated, uintptr(unsafe.Pointer(u16(src))), h)
-		})
-	}
+	w.addUserScripts()
 
 	var token int64
 	tok := uintptr(unsafe.Pointer(&token))
@@ -633,6 +616,53 @@ func (w *window) URL() string {
 }
 
 func (w *window) IsLoading() bool { return w.loading }
+
+// addUserScripts gives the webview the scripts of the options, and the
+// script that tells the bridge the room of the caption buttons.
+func (w *window) addUserScripts() {
+	scripts := w.opts.UserScripts
+	if w.caption != nil {
+		// After the bridge, which it tells.
+		scripts = append(scripts[:len(scripts):len(scripts)], platform.UserScript{Source: w.titleBarScript()})
+	}
+	gen := w.scriptGen
+	for _, us := range scripts {
+		src := us.Source
+		if us.AtDocumentEnd {
+			src = "document.readyState===\"loading\"?document.addEventListener(\"DOMContentLoaded\",()=>{\n" + src + "\n},{once:true}):(()=>{\n" + src + "\n})();"
+		}
+		if !us.AllFrames {
+			// Scripts run in every frame unless told otherwise.
+			src = "if(window===window.top){\n" + src + "\n}"
+		}
+		withHandler(func(hr, id uintptr) {
+			if failed(hr) || id == 0 || w.closed || w.webview == 0 {
+				return
+			}
+			sid := wstr(id)
+			if gen != w.scriptGen {
+				// SetUserScripts replaced the scripts as this one was added.
+				comCall(w.webview, wvRemoveScriptToExecuteOnDocumentCreated, uintptr(unsafe.Pointer(u16(sid))))
+				return
+			}
+			w.scriptIDs = append(w.scriptIDs, sid)
+		}, func(h uintptr) uintptr {
+			return comCall(w.webview, wvAddScriptToExecuteOnDocumentCreated, uintptr(unsafe.Pointer(u16(src))), h)
+		})
+	}
+}
+
+func (w *window) SetUserScripts(scripts []platform.UserScript) {
+	w.opts.UserScripts = scripts
+	w.withWebView(func() {
+		for _, id := range w.scriptIDs {
+			comCall(w.webview, wvRemoveScriptToExecuteOnDocumentCreated, uintptr(unsafe.Pointer(u16(id))))
+		}
+		w.scriptIDs = nil
+		w.scriptGen++
+		w.addUserScripts()
+	})
+}
 
 func (w *window) Eval(js string) {
 	w.withWebView(func() {

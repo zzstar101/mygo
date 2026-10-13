@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,21 +71,70 @@ func TestTextsComplete(t *testing.T) {
 	}
 }
 
-func TestMergeTexts(t *testing.T) {
+// TestUseTextsKeepsZero checks that a field UseTexts leaves at its zero
+// value keeps what the language says, even where the zero value is a day of
+// its own, as Sunday is.
+func TestUseTextsKeepsZero(t *testing.T) {
+	defer resetControlTexts()
 	base := *textsFor("en")
-	got := mergeTexts(base, Texts{NextMonth: "Weiter"})
+	UseTexts(map[string]Texts{"en": {NextMonth: "Weiter"}})
+	got := textsFor("en")
 	if got.NextMonth != "Weiter" || got.PreviousMonth != base.PreviousMonth || got.firstWeekday() != base.firstWeekday() {
-		t.Errorf("merge kept %q and %v, changed %q", got.PreviousMonth, got.firstWeekday(), got.NextMonth)
+		t.Errorf("UseTexts kept %q and %v, changed %q", got.PreviousMonth, got.firstWeekday(), got.NextMonth)
 	}
-	// A field left at its zero value keeps what the language says, even
-	// where the zero value is a day of its own, as Sunday is.
-	got = mergeTexts(base, Texts{Weekdays: [7]string{"a", "b", "c", "d", "e", "f", "g"}, FirstWeekday: Weekday(time.Sunday)})
-	if got.Weekdays[0] != "a" || got.firstWeekday() != time.Sunday {
-		t.Errorf("merge kept %v, changed %q", got.firstWeekday(), got.Weekdays[0])
+	UseTexts(map[string]Texts{"en": {Weekdays: [7]string{"a", "b", "c", "d", "e", "f", "g"}, FirstWeekday: Weekday(time.Sunday)}})
+	if got := textsFor("en"); got.Weekdays[0] != "a" || got.firstWeekday() != time.Sunday || got.NextMonth != "Weiter" {
+		t.Errorf("UseTexts kept %q, changed %v and %q", got.NextMonth, got.firstWeekday(), got.Weekdays[0])
 	}
-	got = mergeTexts(base, Texts{More: ""})
-	if got.firstWeekday() != base.firstWeekday() {
-		t.Errorf("merge kept %v", got.firstWeekday())
+	UseTexts(map[string]Texts{"en": {More: ""}})
+	if got := textsFor("en"); got.firstWeekday() != time.Sunday {
+		t.Errorf("UseTexts kept %v", got.firstWeekday())
+	}
+}
+
+// TestUseTextsAtomic changes the texts of one language from several
+// goroutines at once, each a field of its own, which all stay.
+func TestUseTextsAtomic(t *testing.T) {
+	defer resetControlTexts()
+	var wg sync.WaitGroup
+	for i := range 40 {
+		wg.Add(2)
+		go func() { defer wg.Done(); UseTexts(map[string]Texts{"de": {Find: fmt.Sprint("Suchen ", i)}}) }()
+		go func() { defer wg.Done(); UseTexts(map[string]Texts{"de": {More: fmt.Sprint("Mehr ", i)}}) }()
+	}
+	wg.Wait()
+	if got := textsFor("de"); !strings.HasPrefix(got.Find, "Suchen") || !strings.HasPrefix(got.More, "Mehr") {
+		t.Errorf("de says %q and %q", got.Find, got.More)
+	}
+}
+
+// TestEngineKeepsTexts checks that a frame finds the texts of the controls
+// without matching the locale again, and that a new locale or UseTexts
+// gives it new ones.
+func TestEngineKeepsTexts(t *testing.T) {
+	defer resetControlTexts()
+	var got []*Texts
+	tt := coreNewTester(func(c *context) {
+		got = append(got, c.rt.ownTexts(), c.rt.public.Texts())
+	}, 100, 100)
+	first := got[0]
+	tt.Frame()
+	for _, tx := range got {
+		if tx != first {
+			t.Fatal("the frames matched the locale again")
+		}
+	}
+	if n := testing.AllocsPerRun(50, func() { tt.rt.ownTexts() }); n != 0 {
+		t.Errorf("ownTexts allocates %v times", n)
+	}
+	tt.SetLocale("zh-Hans")
+	if tx := got[len(got)-1]; tx.Find != "查找" {
+		t.Errorf("after SetLocale the controls say %q", tx.Find)
+	}
+	UseTexts(map[string]Texts{"zh-Hans": {Find: "寻找"}})
+	tt.Frame()
+	if tx := got[len(got)-1]; tx.Find != "寻找" {
+		t.Errorf("after UseTexts the controls say %q", tx.Find)
 	}
 }
 
@@ -128,4 +180,7 @@ func TestUseTexts(t *testing.T) {
 
 // resetControlTexts puts back the texts the controls ship with, for a test
 // that changed them with UseTexts.
-func resetControlTexts() { controlTexts = i18n.New[Texts]("en", builtinTexts) }
+func resetControlTexts() {
+	controlTexts = i18n.New[Texts]("en", builtinTexts)
+	textsVersion.Add(1)
+}

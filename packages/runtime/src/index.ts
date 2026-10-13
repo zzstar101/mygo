@@ -96,8 +96,9 @@ export function locale(): string {
 /**
  * Subscribes to changes of the locale the app shows, e.g. when the app
  * switches language, or the system's language changes and the app follows
- * it. The listener is called with the new tag. Returns a function that
- * unsubscribes.
+ * it. The listener is called with the new tag, and only with a tag the page
+ * did not have: a page loaded after a change starts with the new locale.
+ * Returns a function that unsubscribes.
  *
  * ```ts
  * onLocaleChange((tag) => show(tag));

@@ -12,7 +12,7 @@ import (
 // new date, which keeps the time of day and location of *date.
 func coreDateInput(c *context, date *time.Time) *node {
 	t := c.theme
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	b := coreButton(c, "")
 	b.widget, b.role, b.accValue = "DateInput", RolePopUpButton, tx.Day(date.Year(), date.Month(), date.Day())
 	b.MinWidth(t.Space(32.5)).Justify(SpaceBetween)
@@ -94,7 +94,7 @@ func sameDay(a, b time.Time) bool {
 // every move does with moveChooses.
 func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose func(time.Time)) *node {
 	t := c.theme
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	cur := *cursor
 	month := time.Date(cur.Year(), cur.Month(), 1, 0, 0, 0, 0, time.UTC)
 	first := tx.firstWeekday()

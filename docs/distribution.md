@@ -339,8 +339,9 @@ the app and to create a desktop shortcut, which is checked; silent
 installs (`/S`) create none.
 
 The installer is in each language the app [declares](i18n.md#the-languages-a-build-declares),
-and picks among them by the language of the system. A language NSIS has no
-language file for is skipped, with a message.
+and picks among them by the language of the system. A language NSIS 3 has
+no language file of fails the build of the installer, with an error that
+names it.
 
 The installer is made with [NSIS](https://nsis.sourceforge.io). On
 Windows, `mygo build` uses NSIS when it is installed, and otherwise
@@ -405,7 +406,8 @@ the app.
 A language the app [declares](i18n.md#the-languages-a-build-declares) names
 it in the desktop entry: the first language is the one a launcher shows
 where the language of the system is not among them, and each further
-language adds its `Name[fr]`, `Comment[fr]` and `Keywords[fr]`.
+language adds its `Name[fr]`, `Comment[fr]` and `Keywords[fr]`, under the
+POSIX locale a launcher matches (`zh-Hans` is `zh_CN`).
 The app opens from the applications menu. `command` also gives it a
 command, `/usr/bin/my-app` from the package and `~/.local/bin/my-app` from
 [`install.sh`](#the-install-script); without it, neither adds a command,

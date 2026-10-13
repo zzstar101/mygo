@@ -415,7 +415,7 @@ func coreAutocomplete(c *context, value *string, suggestions []string) *node {
 //	}
 func coreSearchField(c *context, query *string) *node {
 	t := c.theme
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	f, in := field(c, func() *node {
 		magnifier(c)
 		in := coreTextInputBase(c, query).Grow(1).MinWidth(t.Space(15)).Placeholder(tx.Search)
@@ -478,7 +478,7 @@ func magnifier(c *context) *node {
 //	ui.TokenField(c, &app.tags, allTags).Label("Tags")
 func coreTokenField(c *context, tokens *[]string, suggestions []string) *node {
 	t := c.theme
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	var p *comboboxParts
 	var query *string
 	changed := false

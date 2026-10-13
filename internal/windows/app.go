@@ -28,6 +28,9 @@ type Backend struct {
 
 	windows map[uintptr]*window // by HWND
 	appMenu *platform.Menu
+	// locale is the display language a WM_SETTINGCHANGE of "intl" found
+	// last, which tells of a change of the language only when it is not.
+	locale string
 
 	// The WebView2 environment is created asynchronously, when the first
 	// window that shows a web page needs it; windows wait.
@@ -98,6 +101,7 @@ func (b *Backend) IsMainThread() bool { return currentThreadID() == mainThreadID
 func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	b.h = h
 	b.name = opts.Name
+	b.locale = userUILanguage()
 	theBackend = b
 	procCoInitializeEx.Call(0, coinitApartmentThreaded)
 	if has(procSetProcessDpiAwarenessContext) {
@@ -334,7 +338,12 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 			b.applyTheme()
 			b.h.ThemeChanged()
 		case lp != 0 && wstr(lp) == settingIntl:
-			b.h.LocaleChanged()
+			// The regional formats change too, which the app does not
+			// show: only another display language is a change.
+			if locale := userUILanguage(); locale != b.locale {
+				b.locale = locale
+				b.h.LocaleChanged()
+			}
 		case preferencesChanged(wp, lp):
 			b.h.ThemeChanged()
 		}
@@ -505,10 +514,34 @@ func (a appController) ShowAboutPanel(o platform.AboutPanelOptions) {
 	a.b.messageBox(0, &platform.MessageBoxOptions{Type: "info", Title: "About " + o.ApplicationName, Message: o.ApplicationName, Detail: detail, Buttons: []string{"OK"}})
 }
 
+// Locale returns the display language of the user, as Electron's
+// app.getLocale does, and not the language of the regional formats
+// (GetUserDefaultLocaleName), which may be another: English Windows with
+// the formats of China.
 func (a appController) Locale() string {
+	return userUILanguage()
+}
+
+// userUILanguage returns the first of the user's preferred display
+// languages, e.g. "zh-CN", or en-US when Windows tells none.
+func userUILanguage() string {
+	const muiLanguageName = 0x8
+	var count, size uint32
+	if ok, _, _ := procGetUserPreferredUILanguages.Call(muiLanguageName, uintptr(unsafe.Pointer(&count)), 0, uintptr(unsafe.Pointer(&size))); ok != 0 && size > 0 {
+		buf := make([]uint16, size)
+		if ok, _, _ := procGetUserPreferredUILanguages.Call(muiLanguageName, uintptr(unsafe.Pointer(&count)), uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size))); ok != 0 {
+			// A list of names, each ending in a NUL: the first is the one
+			// the user prefers.
+			if tag := syscall.UTF16ToString(buf); tag != "" {
+				return tag
+			}
+		}
+	}
 	buf := make([]uint16, 85) // LOCALE_NAME_MAX_LENGTH
-	if n, _, _ := procGetUserDefaultLocaleNm.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf))); n > 0 {
-		return syscall.UTF16ToString(buf)
+	if id, _, _ := procGetUserDefaultUILanguage.Call(); id != 0 {
+		if n, _, _ := procLCIDToLocaleName.Call(id, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), 0); n > 0 {
+			return syscall.UTF16ToString(buf)
+		}
 	}
 	return "en-US"
 }

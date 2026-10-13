@@ -432,6 +432,9 @@ type Page interface {
 	IsLoading() bool
 	// Eval runs JavaScript in the main frame and ignores the result.
 	Eval(js string)
+	// SetUserScripts replaces the scripts WindowOptions.UserScripts gave
+	// the pages loaded later; the page loaded now keeps those it ran.
+	SetUserScripts(scripts []UserScript)
 	// CallAsyncFunction runs body as the body of an async function in the
 	// main frame, awaits it and reports the returned value, which the
 	// caller arranges to be a string. err is non-nil when the body fails to

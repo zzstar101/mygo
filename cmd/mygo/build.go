@@ -551,28 +551,34 @@ func linuxDesktopEntry(c *Config, exec, icon string) string {
 	name, comment, keywords := c.desktopNames()
 	var b strings.Builder
 	b.WriteString("[Desktop Entry]\nType=Application\nName=" + name + "\n")
-	for _, l := range c.Languages {
-		if l.Name != "" && l.Name != name {
-			b.WriteString("Name[" + desktopTag(l.Tag) + "]=" + l.Name + "\n")
+	// localized writes the key of each language whose value is its own,
+	// once a locale: es and es-419 are both es.
+	localized := func(key, value string, of func(l Language) string) {
+		seen := map[string]bool{}
+		for _, l := range c.Languages {
+			v, locale := of(l), desktopTag(l.Tag)
+			if v == "" || v == value || seen[locale] {
+				continue
+			}
+			seen[locale] = true
+			b.WriteString(key + "[" + locale + "]=" + v + "\n")
 		}
 	}
+	localized("Name", name, func(l Language) string { return l.Name })
 	if comment != "" {
 		b.WriteString("Comment=" + comment + "\n")
 	}
-	for _, l := range c.Languages {
-		if l.Comment != "" && l.Comment != comment {
-			b.WriteString("Comment[" + desktopTag(l.Tag) + "]=" + l.Comment + "\n")
+	localized("Comment", comment, func(l Language) string { return l.Comment })
+	joined := func(words []string) string {
+		if len(words) == 0 {
+			return ""
 		}
+		return strings.Join(words, ";") + ";"
 	}
 	if len(keywords) > 0 {
-		b.WriteString("Keywords=" + strings.Join(keywords, ";") + ";\n")
+		b.WriteString("Keywords=" + joined(keywords) + "\n")
 	}
-	for _, l := range c.Languages {
-		if len(l.Keywords) == 0 || slices.Equal(l.Keywords, keywords) {
-			continue
-		}
-		b.WriteString("Keywords[" + desktopTag(l.Tag) + "]=" + strings.Join(l.Keywords, ";") + ";\n")
-	}
+	localized("Keywords", joined(keywords), func(l Language) string { return joined(l.Keywords) })
 	var mime []string
 	for _, fa := range c.FileAssociations {
 		t, _ := c.mimeType(fa)

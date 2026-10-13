@@ -736,8 +736,7 @@ func (g *gallery) controls(c *ui.Context) {
 			})
 		})
 		// The controls say their own texts in the app's locale, which
-		// App.SetLocale changes while the window is open, and which the
-		// gallery remembers across runs (App.RememberLocale).
+		// App.SetLocale changes while the window is open.
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "The controls say their own texts in").TextColor(t.TextMuted)
 			ui.MenuButton(c, mygo.App.Locale(), func(m *ui.Menu) {
@@ -1800,9 +1799,6 @@ func (g *gallery) overlays(c *ui.Context) {
 
 func main() {
 	g := &gallery{router: ui.NewRouter("/overview"), items: []motionItem{{1, "Item 1"}, {2, "Item 2"}, {3, "Item 3"}}, nextItem: 3, size: "Medium", fruit: "Apple", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, tree: map[string]bool{"ui": true}, birthday: time.Date(1815, 12, 10, 0, 0, 0, 0, time.UTC), now: time.Now(), font: "Helvetica", tags: []string{"go", "native"}, sections: [3]bool{true}, sectionsOpen: [2]bool{true, true}, stars: 4, battery: 35, quality: 75, priceLow: 100, priceHigh: 350, meeting: time.Date(2026, 10, 15, 9, 30, 0, 0, time.Local), tint: ui.Hex("#2563eb"), lens: [2]float32{110, 190}, glassEdge: 1, notes: 12, notifyMail: true, pathDepth: 4, chart: newCharts()}
-	// The language picked in the gallery's own language menu is the one it
-	// starts with next time.
-	mygo.App.RememberLocale(true)
 	mygo.App.WhenReady(func() {
 		g.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:    "MyGo UI Gallery",

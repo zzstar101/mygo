@@ -97,7 +97,7 @@ var swatches = []struct {
 // color.
 func coreColorPicker(c *context, color *Color) *node {
 	t := c.theme
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	panel := coreColumn(c).Gap(t.Space(2.5)).Width(t.Space(60)).Shrink(0)
 	panel.widget = "ColorPicker"
 	st := coreLocal(panel, "picker", func() pickerState {

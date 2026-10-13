@@ -219,6 +219,7 @@ func (w *window) CanGoForward() bool                                       { ret
 func (w *window) URL() string                                              { return "" }
 func (w *window) IsLoading() bool                                          { return false }
 func (w *window) Eval(string)                                              {}
+func (w *window) SetUserScripts([]platform.UserScript)                     {}
 func (w *window) SetZoom(float64)                                          {}
 func (w *window) Zoom() float64                                            { return 1 }
 func (w *window) SetUserAgent(string)                                      {}

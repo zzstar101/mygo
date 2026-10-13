@@ -54,7 +54,7 @@ var inspIcons = sync.OnceValue(func() (icons struct{ pick, close, warn, arrow *S
 // window w×h.
 func (rt *engine) buildInspector(c *context, appW, w, h float32) {
 	in := &rt.insp
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	in.shown, in.changed = in.sum, false
 	if in.opened == nil {
 		in.opened = map[uint64]bool{}
@@ -230,7 +230,7 @@ func (in *inspector) treeRows() {
 
 // tree builds the tree of elements as markup, Chrome's Elements panel.
 func (in *inspector) tree(c *context, rt *engine) {
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	in.treeRows()
 	if in.reveal && in.selected != 0 {
 		in.reveal = false

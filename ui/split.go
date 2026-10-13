@@ -17,7 +17,7 @@ func coreSplitVertical(c *context, size *float32, first, second func()) *node {
 
 func split(c *context, size *float32, first, second func(), vertical bool) *node {
 	t := c.theme
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	minPane, grip := t.Space(10), t.Space(1.5)
 	// One element or the other: creating one adds it to the parent.
 	var e *node

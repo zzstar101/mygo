@@ -92,7 +92,7 @@ that must start instantly.
   shell, displays, dark mode, power, the network status, secrets, watching
   files and global shortcuts.
 - [Languages](i18n.md): the locale an app shows, the strings of the
-  controls and how an app changes them, matching the desktop's language,
+  menus and the controls and how an app changes them, matching the desktop's language,
   and knowing when the locale changes.
 - [Launchers](launchers.md): apps in the manner of Spotlight and Raycast,
   summoned by a shortcut over every app, which find and open the apps

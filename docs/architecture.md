@@ -1172,12 +1172,15 @@ as in Tauri:
   a window maximized: `zoom:` on macOS, `gtk_window_maximize` before
   mapping on Linux, `SW_SHOWMAXIMIZED` on the first show on Windows, where
   `Maximize` on a hidden window also waits for it to be shown.
-- The language an app shows (`locale_pref.go`) is remembered across runs when
-  `App.RememberLocale(true)` is on: `SetLocale` writes the tag to `locale` in
-  `PathUserData` (an empty tag removes it), and `App.Run` reads it back on the
-  main thread before the backend starts, so the tag is the app's own from the
-  first frame and the system's language no longer overrides it. A damaged
-  file is ignored. Browser builds have no file (`locale_pref_js.go`).
+- The language an app shows (`App.SetLocale`, `app.go`) is the app's own
+  tag or the backend's `Locale`, the user's preferred language: on Windows
+  the display language (`GetUserPreferredUILanguages`), not the regional
+  formats. `App.shownLocale` keeps the one the windows last heard of, which
+  the controls of native UI read every frame without asking the system;
+  `updateLocale` tells the windows (`Conn.LocaleChanged`, the pages'
+  `mygo:locale` and their document start scripts, `Page.SetUserScripts`),
+  the menus whose labels are their roles' (`menu_texts.go`) and
+  `OnLocaleChanged` only when it changed.
 - Deep links (`deeplink.go`). `mygo build` and `mygo dev` link the name,
   version, identifier and `urlSchemes` of the configuration into the binary
   (`-X …packageName=…`), which is how Linux builds know them (`IsPackaged`,

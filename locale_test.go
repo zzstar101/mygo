@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/internal/fake"
 )
 
@@ -121,20 +122,75 @@ func hasLocaleEvent(scripts []string, tag string) bool {
 	return false
 }
 
+// TestLocaleAfterNavigation checks that the pages a window loads after the
+// locale changed read the new one at document start, and that the page is
+// told the locale again as it loads, which its bridge tells no listener of
+// when it had it already.
 func TestLocaleAfterNavigation(t *testing.T) {
 	resetLocale(t)
-	_, fw := readyWindow(t, WindowOptions{})
+	_, fw := readyWindow(t, WindowOptions{Page: PageOptions{PreloadScript: "window.preloaded = 1"}})
 	App.SetLocale("zh-Hans")
 	received(t, fw, func(m map[string]any) bool { return localeEvent(m, "zh-Hans") })
 
-	// The script at document start carries the locale of the window's
-	// creation; a page loaded later hears the current one.
-	if got := fw.Opts.UserScripts[0].Source; strings.Contains(got, `"locale":"zh-Hans"`) {
-		t.Fatal("the bridge configuration of a later page should keep the locale of the window's creation")
+	scripts := fw.UserScripts()
+	if len(scripts) != 3 || !strings.Contains(scripts[0].Source, `"locale":"zh-Hans"`) {
+		t.Fatalf("the bridge configuration of a later page has not the locale: %v", scripts)
+	}
+	if scripts[2].Source != "window.preloaded = 1" {
+		t.Errorf("the preload script went: %v", scripts)
+	}
+	// The secret of the window's bridge stays.
+	if !strings.Contains(scripts[0].Source, `"secret":"`+secret(fw)+`"`) {
+		t.Errorf("the bridge configuration changed its secret")
 	}
 	seen := len(fw.Scripts())
 	page(fw, `{"t":"dom-ready"}`)
 	receivedAfter(t, fw, seen, func(m map[string]any) bool { return localeEvent(m, "zh-Hans") })
+}
+
+// TestLocaleChangesOnly checks that OnLocaleChanged, and the pages, hear of
+// the locale the app shows when it changed only: not when the system tells
+// of a change that left the language as it was, nor when SetLocale sets
+// the language the system has.
+func TestLocaleChangesOnly(t *testing.T) {
+	resetLocale(t)
+	_, fw := readyWindow(t, WindowOptions{})
+	onMain(func() {}) // everything the tests before queued has run
+	var heard []string
+	off := App.OnLocaleChanged(func(tag string) { heard = append(heard, tag) })
+	defer off()
+	seen := len(fw.Scripts())
+
+	fb.SetSystemLocale("en-US") // a change of region settings, say
+	App.SetLocale("en-US")      // what the system has
+	App.SetLocale("")
+	onMain(func() {})
+	if len(heard) != 0 {
+		t.Errorf("OnLocaleChanged heard %q, want nothing", heard)
+	}
+	if got := localeEventsAfter(t, fw, seen); len(got) != 0 {
+		t.Errorf("the page heard %q, want nothing", got)
+	}
+
+	fb.SetSystemLocale("de-DE")
+	onMain(func() {})
+	if len(heard) != 1 || heard[0] != "de-DE" {
+		t.Errorf("OnLocaleChanged heard %q, want [de-DE]", heard)
+	}
+}
+
+// TestSystemLocale checks that SystemLocale is the system's language
+// whatever SetLocale set.
+func TestSystemLocale(t *testing.T) {
+	resetLocale(t)
+	fb.SetSystemLocale("fr-FR")
+	App.SetLocale("ja")
+	if got := App.SystemLocale(); got != "fr-FR" {
+		t.Errorf("SystemLocale() = %q, want fr-FR", got)
+	}
+	if got := App.Locale(); got != "ja" {
+		t.Errorf("Locale() = %q, want ja", got)
+	}
 }
 
 // TestSetLocaleCoalesces checks that the SetLocale calls made before the
@@ -143,9 +199,7 @@ func TestLocaleAfterNavigation(t *testing.T) {
 // older than the one the app shows.
 func TestSetLocaleCoalesces(t *testing.T) {
 	resetLocale(t)
-	path := rememberLocale(t)
 	_, fw := readyWindow(t, WindowOptions{})
-	onMain(func() { App.RememberLocale(true) })
 	onMain(func() {}) // everything the tests before queued has run
 
 	var heard []string
@@ -168,9 +222,6 @@ func TestSetLocaleCoalesces(t *testing.T) {
 
 	if got := App.Locale(); got != "ja" {
 		t.Errorf("App.Locale() = %q, want %q", got, "ja")
-	}
-	if got := readLocaleFile(t, path); got != "ja" {
-		t.Errorf("the app kept %q, want %q", got, "ja")
 	}
 	if len(heard) != 1 || heard[0] != "ja" {
 		t.Errorf("OnLocaleChanged heard %q, want [ja]", heard)
@@ -235,4 +286,42 @@ func receivedAfter(t *testing.T, fw *fake.Window, n int, pred func(m map[string]
 	}
 	t.Fatalf("message not received; scripts: %q", fw.Scripts())
 	return nil
+}
+
+// TestMenuRolesFollowLocale checks that the items of a menu say the labels
+// of their roles in the language of the locale the app shows, and keep a
+// label the app gave them.
+func TestMenuRolesFollowLocale(t *testing.T) {
+	resetLocale(t)
+	before := App.Menu()
+	t.Cleanup(func() {
+		menuTexts = i18n.New("en", builtinMenuTexts)
+		App.SetMenu(before)
+	})
+	App.SetMenu(NewMenu([]*MenuItem{
+		{Role: RoleEditMenu},
+		{Label: "Tools", Submenu: []*MenuItem{{Label: "Grab", Role: RoleCopy}, {Role: RoleCopy}}},
+	}))
+	labels := func() (edit, undo, grab, copyText string) {
+		m := fb.AppMenu()
+		return m.Items[0].Label, m.Items[0].Submenu.Items[0].Label, m.Items[1].Submenu.Items[0].Label, m.Items[1].Submenu.Items[1].Label
+	}
+	if edit, undo, grab, copyText := labels(); edit != "Edit" || undo != "Undo" || grab != "Grab" || copyText != "Copy" {
+		t.Errorf("the menu says %q, %q, %q and %q", edit, undo, grab, copyText)
+	}
+	App.SetLocale("zh-Hans")
+	onMain(func() {})
+	if edit, undo, grab, copyText := labels(); edit != "编辑" || undo != "撤销" || grab != "Grab" || copyText != "复制" {
+		t.Errorf("in zh-Hans the menu says %q, %q, %q and %q", edit, undo, grab, copyText)
+	}
+	// A language the app adds, with English for what it leaves out.
+	UseMenuTexts(map[string]MenuTexts{"de": {Edit: "Bearbeiten", Undo: "Widerrufen"}})
+	App.SetLocale("de-DE")
+	onMain(func() {})
+	if edit, undo, _, copyText := labels(); edit != "Bearbeiten" || undo != "Widerrufen" || copyText != "Copy" {
+		t.Errorf("in de-DE the menu says %q, %q and %q", edit, undo, copyText)
+	}
+	if got := roleTexts().QuitApp("Notes"); got != "Quit Notes" {
+		t.Errorf("de-DE quits with %q", got)
+	}
 }

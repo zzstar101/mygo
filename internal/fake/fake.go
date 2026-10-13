@@ -384,19 +384,21 @@ type Window struct {
 	// Flyout is how a flyout was placed last.
 	Flyout platform.Flyout
 
-	mu        sync.Mutex
-	scripts   []string
-	title     string
-	url       string
-	bounds    platform.Rect
-	visible   bool
-	focused   bool
-	minimized bool
-	maximized bool
-	full      bool
-	zoom      float64
-	closed    bool
-	devtools  bool
+	mu      sync.Mutex
+	scripts []string
+	// userScripts are what SetUserScripts set, or nil.
+	userScripts []platform.UserScript
+	title       string
+	url         string
+	bounds      platform.Rect
+	visible     bool
+	focused     bool
+	minimized   bool
+	maximized   bool
+	full        bool
+	zoom        float64
+	closed      bool
+	devtools    bool
 	// Dropped is what DroppedFiles returns, once.
 	Dropped []string
 	// PDF holds the options of the last PrintToPDF.
@@ -597,6 +599,25 @@ func (w *Window) addHTML(html string) {
 	defer w.mu.Unlock()
 	w.HTML = append(w.HTML, html)
 	w.url = "about:blank"
+}
+
+// SetUserScripts replaces the scripts of the pages loaded later, which
+// UserScripts returns.
+func (w *Window) SetUserScripts(scripts []platform.UserScript) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.userScripts = append([]platform.UserScript(nil), scripts...)
+}
+
+// UserScripts returns the scripts a page loaded now gets: those of the
+// options, or the ones SetUserScripts set since.
+func (w *Window) UserScripts() []platform.UserScript {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.userScripts != nil {
+		return append([]platform.UserScript(nil), w.userScripts...)
+	}
+	return append([]platform.UserScript(nil), w.Opts.UserScripts...)
 }
 
 func (w *Window) Eval(js string) {

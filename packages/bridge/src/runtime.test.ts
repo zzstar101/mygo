@@ -106,6 +106,18 @@ describe("events", () => {
     internal.receive({ t: "event", n: "mygo:locale", p: 7 });
     expect(runtime.locale).toBe("zh-Hans");
   });
+
+  test("the locale the page has already tells no listener", () => {
+    const { runtime, internal } = setup();
+    const seen: string[] = [];
+    runtime.on<string>("mygo:locale", (tag) => seen.push(tag));
+    // As the page loads, Go tells it the locale its configuration has.
+    internal.receive({ t: "event", n: "mygo:locale", p: "en-US" });
+    expect(seen).toEqual([]);
+    internal.receive({ t: "event", n: "mygo:locale", p: "ja" });
+    internal.receive({ t: "event", n: "mygo:locale", p: "ja" });
+    expect(seen).toEqual(["ja"]);
+  });
 });
 
 describe("channels", () => {

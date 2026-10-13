@@ -1,7 +1,10 @@
 package i18n
 
 import (
+	"fmt"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -86,5 +89,53 @@ func TestCatalogZeroValue(t *testing.T) {
 	c.Use("en", greeting{Hello: "Hello"})
 	if got := c.Get("en-US").Hello; got != "Hello" {
 		t.Errorf("after Use, en-US says %q", got)
+	}
+}
+
+// TestCatalogChange checks that Change keeps what a change leaves at its
+// zero value, adds the language of a tag the catalog has none of from the
+// texts it said for it, and that no reader sees a change half made.
+func TestCatalogChange(t *testing.T) {
+	c := New("en", map[string]greeting{
+		"en":      {Hello: "Hello", Bye: "Bye"},
+		"zh-Hant": {Hello: "你好", Bye: "再見"},
+	})
+	c.Change(map[string]greeting{
+		"en":         {Bye: "Goodbye"},
+		"zh-Hant-TW": {Hello: "您好"},
+		"de":         {Hello: "Hallo"},
+	})
+	for locale, want := range map[string]greeting{
+		"en-US": {Hello: "Hello", Bye: "Goodbye"},
+		"zh-TW": {Hello: "您好", Bye: "再見"},
+		"zh-HK": {Hello: "你好", Bye: "再見"},
+		"de-AT": {Hello: "Hallo", Bye: "Goodbye"},
+		"fr-FR": {Hello: "Hello", Bye: "Goodbye"},
+	} {
+		if got := *c.Get(locale); got != want {
+			t.Errorf("%s says %+v, want %+v", locale, got, want)
+		}
+	}
+
+	// Two goroutines that change different fields of one language keep
+	// both changes.
+	var wg sync.WaitGroup
+	for i := range 50 {
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Change(map[string]greeting{"fr": {Hello: fmt.Sprint("Bonjour ", i)}}) }()
+		go func() { defer wg.Done(); c.Change(map[string]greeting{"fr": {Bye: fmt.Sprint("Au revoir ", i)}}) }()
+	}
+	wg.Wait()
+	if got := *c.Get("fr"); !strings.HasPrefix(got.Hello, "Bonjour") || !strings.HasPrefix(got.Bye, "Au revoir") {
+		t.Errorf("fr says %+v after concurrent changes", got)
+	}
+}
+
+// TestCatalogGetAllocates holds Get, which the controls call as they
+// build, to matching a locale without allocating.
+func TestCatalogGetAllocates(t *testing.T) {
+	c := New("en", map[string]greeting{"en": {Hello: "Hello"}, "zh-Hans": {Hello: "你好"}, "zh-Hant": {Hello: "你好"}})
+	if n := testing.AllocsPerRun(100, func() { c.Get("zh-Hant-TW") }); n != 0 {
+		t.Errorf("Get allocates %v times", n)
 	}
 }

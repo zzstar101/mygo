@@ -46,7 +46,8 @@ type host interface {
 	isDark() bool
 	preferences() platform.Preferences
 	// locale returns the locale the app shows: App.SetLocale's, or the
-	// user's preferred locale.
+	// user's preferred language. The controls read it every frame, and it
+	// costs nothing.
 	locale() string
 	titleBar() TitleBar
 	// vibrancy reports whether the window shows a material where the
@@ -74,6 +75,11 @@ type host interface {
 // the view function, lays them out, paints them and routes input to the
 // elements of the last frame. Main thread only, except where noted.
 type engine struct {
+	// textsOf are the texts of the controls (ownTexts), of the locale
+	// textsLocale and the changes of UseTexts textsVersion counted.
+	textsOf      *Texts
+	textsLocale  string
+	textsVersion uint64
 	// inlineRects is placeInline's scratch, kept from frame to frame.
 	inlineRects []text.Rect
 	// byPosition holds the keys whose press stood for its physical key
@@ -395,10 +401,6 @@ func (rt *engine) themeChanged() {
 	rt.redraw, rt.repaintDue = false, time.Time{}
 	rt.host.requestFrame()
 }
-
-// locale returns the locale the app shows, which App.SetLocale sets, or the
-// user's preferred locale.
-func (rt *engine) locale() string { return rt.host.locale() }
 
 // runFrame builds, lays out, paints and presents a frame.
 func (rt *engine) runFrame() {

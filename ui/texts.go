@@ -2,7 +2,7 @@ package ui
 
 import (
 	"fmt"
-	"reflect"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/i18n"
@@ -370,35 +370,26 @@ var builtinTexts = map[string]Texts{
 // language says English.
 var controlTexts = i18n.New[Texts]("en", builtinTexts)
 
+// textsVersion counts the changes UseTexts made, which the texts an engine
+// keeps for its frames are of.
+var textsVersion atomic.Uint64
+
 // UseTexts changes the texts the controls say of their own, or adds the
 // texts of languages the framework has none of. A language's texts are its
-// tag's, as "zh-Hant-TW": its own language's with the changes the app made.
+// tag's, as "zh-Hant-TW": its own language's with the changes the app made,
+// where a field left at its zero value keeps what the language says.
 //
 //	ui.UseTexts(map[string]ui.Texts{
 //		"zh-Hans": {NextMonth: "下一月"},
 //		"de":      {Find: "Suchen", Search: "Suchen", Clear: "Löschen"},
 //	})
 //
-// It is safe from any goroutine, and the windows shown draw their controls
-// again with the texts it set.
+// It is safe from any goroutine, makes its changes at once, and the windows
+// shown draw their controls again with the texts it set.
 func UseTexts(texts map[string]Texts) {
-	for tag, t := range texts {
-		controlTexts.Use(tag, mergeTexts(*textsFor(tag), t))
-	}
+	controlTexts.Change(texts)
+	textsVersion.Add(1)
 	textsChanged()
-}
-
-// mergeTexts returns the texts of a language with what over changes, which
-// keeps what it leaves at a zero value: the zero value of every field of
-// Texts means "keep what the language says".
-func mergeTexts(t, over Texts) Texts {
-	to, from := reflect.ValueOf(&t).Elem(), reflect.ValueOf(over)
-	for i := range to.NumField() {
-		if !from.Field(i).IsZero() {
-			to.Field(i).Set(from.Field(i))
-		}
-	}
-	return t
 }
 
 // firstWeekday returns the day a calendar's week starts on: the language's,
@@ -415,14 +406,26 @@ func (t *Texts) firstWeekday() time.Weekday {
 // of them.
 func textsFor(locale string) *Texts { return controlTexts.Get(locale) }
 
+// ownTexts returns the texts of the controls in the language of the locale
+// the app shows, which the engine keeps until the locale or the texts
+// change: the controls read them as they build, every frame.
+func (rt *engine) ownTexts() *Texts {
+	locale, version := rt.host.locale(), textsVersion.Load()
+	if rt.textsOf == nil || rt.textsLocale != locale || rt.textsVersion != version {
+		rt.textsOf, rt.textsLocale, rt.textsVersion = textsFor(locale), locale, version
+	}
+	return rt.textsOf
+}
+
 // Texts returns the texts the controls and the code editor say of their own
 // in the language of the app's locale (mygo.App.SetLocale), as the app
 // changed them with UseTexts. A widget of the app that says the framework's
 // own words, as a code editor built on package ui/editor does, reads them
-// here.
-func (c *Context) Texts() Texts {
+// here. They are the framework's own: read them, and change them with
+// UseTexts.
+func (c *Context) Texts() *Texts {
 	if c == nil || c.rt == nil {
-		return *textsFor("")
+		return textsFor("")
 	}
-	return *textsFor(c.rt.locale())
+	return c.rt.ownTexts()
 }

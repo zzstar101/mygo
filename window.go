@@ -242,6 +242,9 @@ type Window struct {
 	// Only the bridge knows it, so messages posted from elsewhere (an
 	// iframe of another origin) are ignored.
 	secret string
+	// preload is PageOptions.PreloadScript, which the scripts of the pages
+	// loaded later keep (pageScripts).
+	preload string
 
 	// native is only accessed on the main thread; nil once destroyed.
 	native    platform.Window
@@ -534,10 +537,8 @@ func (w *Window) platformOptions(o *WindowOptions) *platform.WindowOptions {
 	if o.Parent != nil && o.Parent.native != nil {
 		p.Parent = o.Parent.native
 	}
-	p.UserScripts = []platform.UserScript{{Source: w.bridgeScript()}, {Source: preferencesScript()}}
-	if po.PreloadScript != "" {
-		p.UserScripts = append(p.UserScripts, platform.UserScript{Source: po.PreloadScript})
-	}
+	w.preload = po.PreloadScript
+	p.UserScripts = w.pageScripts()
 	return p
 }
 

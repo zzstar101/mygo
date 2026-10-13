@@ -225,7 +225,7 @@ func coreAlertDialog(c *context, open *bool, title, message string, buttons ...s
 // nothing.
 func coreFindBar(c *context, open *bool, query *string, matches int, current *int) *node {
 	t := c.theme
-	tx := textsFor(c.rt.locale())
+	tx := c.rt.ownTexts()
 	if !*open {
 		// Nothing, which Changed and the rest can ask.
 		e := coreBox(c).Absolute()

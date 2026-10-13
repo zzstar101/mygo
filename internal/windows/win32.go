@@ -68,18 +68,20 @@ func systemBackdrops() bool { return windowsBuild() >= 22621 }
 
 var (
 	// kernel32
-	procGetModuleHandleW       = kernel32.NewProc("GetModuleHandleW")
-	procGetCurrentThreadId     = kernel32.NewProc("GetCurrentThreadId")
-	procGlobalAlloc            = kernel32.NewProc("GlobalAlloc")
-	procGlobalFree             = kernel32.NewProc("GlobalFree")
-	procGlobalLock             = kernel32.NewProc("GlobalLock")
-	procGlobalUnlock           = kernel32.NewProc("GlobalUnlock")
-	procGlobalSize             = kernel32.NewProc("GlobalSize")
-	procGetUserDefaultLocaleNm = kernel32.NewProc("GetUserDefaultLocaleName")
-	procCreateActCtxW          = kernel32.NewProc("CreateActCtxW")
-	procActivateActCtx         = kernel32.NewProc("ActivateActCtx")
-	procLoadLibraryExW         = kernel32.NewProc("LoadLibraryExW")
-	procGetProcAddress         = kernel32.NewProc("GetProcAddress")
+	procGetModuleHandleW            = kernel32.NewProc("GetModuleHandleW")
+	procGetCurrentThreadId          = kernel32.NewProc("GetCurrentThreadId")
+	procGlobalAlloc                 = kernel32.NewProc("GlobalAlloc")
+	procGlobalFree                  = kernel32.NewProc("GlobalFree")
+	procGlobalLock                  = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock                = kernel32.NewProc("GlobalUnlock")
+	procGlobalSize                  = kernel32.NewProc("GlobalSize")
+	procGetUserPreferredUILanguages = kernel32.NewProc("GetUserPreferredUILanguages")
+	procGetUserDefaultUILanguage    = kernel32.NewProc("GetUserDefaultUILanguage")
+	procLCIDToLocaleName            = kernel32.NewProc("LCIDToLocaleName")
+	procCreateActCtxW               = kernel32.NewProc("CreateActCtxW")
+	procActivateActCtx              = kernel32.NewProc("ActivateActCtx")
+	procLoadLibraryExW              = kernel32.NewProc("LoadLibraryExW")
+	procGetProcAddress              = kernel32.NewProc("GetProcAddress")
 
 	// user32
 	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")

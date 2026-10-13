@@ -350,23 +350,7 @@ func (w *window) createWebView(content NSRect) {
 	// the bridge configuration never leak between windows.
 	w.ucc = alloc("WKUserContentController")
 	send(w.ucc, "addScriptMessageHandler:name:", uintptr(w.delegate), uintptr(nsString("mygo")))
-	for _, s := range o.UserScripts {
-		injection := uintptr(0) // WKUserScriptInjectionTimeAtDocumentStart
-		if s.AtDocumentEnd {
-			injection = 1
-		}
-		script := send(send(class("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:",
-			uintptr(nsString(s.Source)), injection, boolArg(!s.AllFrames))
-		send(w.ucc, "addUserScript:", uintptr(script))
-		release(script)
-	}
-	if w.hiddenTitleBar() {
-		// After the bridge, which it tells: the room of the traffic lights.
-		script := send(send(class("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:",
-			uintptr(nsString(bridge.TitleBarScript(w.TitleBar(), o.Zoom))), 0, 1)
-		send(w.ucc, "addUserScript:", uintptr(script))
-		release(script)
-	}
+	w.addUserScripts()
 	send(cfg, "setUserContentController:", uintptr(w.ucc))
 
 	w.web = msgInitRectID(send(class("MyGoWebView"), "alloc"), sel("initWithFrame:configuration:"), NSRect{Size: content.Size}, cfg)
@@ -1076,6 +1060,39 @@ func (w *window) URL() string {
 	var s string
 	withPool(func() { s = goString(send(send(w.web, "URL"), "absoluteString")) })
 	return s
+}
+
+// addUserScripts gives the content controller the scripts of the options,
+// and the script that tells the bridge the room of the traffic lights.
+func (w *window) addUserScripts() {
+	for _, s := range w.opts.UserScripts {
+		injection := uintptr(0) // WKUserScriptInjectionTimeAtDocumentStart
+		if s.AtDocumentEnd {
+			injection = 1
+		}
+		script := send(send(class("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:",
+			uintptr(nsString(s.Source)), injection, boolArg(!s.AllFrames))
+		send(w.ucc, "addUserScript:", uintptr(script))
+		release(script)
+	}
+	if w.hiddenTitleBar() {
+		// After the bridge, which it tells: the room of the traffic lights.
+		script := send(send(class("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:",
+			uintptr(nsString(bridge.TitleBarScript(w.TitleBar(), w.opts.Zoom))), 0, 1)
+		send(w.ucc, "addUserScript:", uintptr(script))
+		release(script)
+	}
+}
+
+func (w *window) SetUserScripts(scripts []platform.UserScript) {
+	if w.closed || w.ucc == 0 {
+		return
+	}
+	w.opts.UserScripts = scripts
+	withPool(func() {
+		send(w.ucc, "removeAllUserScripts")
+		w.addUserScripts()
+	})
 }
 
 func (w *window) Eval(js string) {

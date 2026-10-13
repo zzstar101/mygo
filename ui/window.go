@@ -58,6 +58,8 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	}
 	conn.TitleBarChanged = rt.requestFrame
 	conn.Changed = rt.changed
+	// The controls say their texts in the language of the locale.
+	conn.LocaleChanged = rt.changed
 	conn.Capture = h.capture
 	conn.Detach = h.detach
 	rt.insp.enabled = conn.DevTools

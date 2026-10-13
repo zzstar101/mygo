@@ -107,7 +107,7 @@ type DiffState struct {
 	partial *diffPartial
 	// texts are the strings of the viewer, read on the last build (see
 	// Context.Texts), which the sides' editors name their text with.
-	texts ui.Texts
+	texts *ui.Texts
 }
 
 // DiffLayout is how a diff viewer lays out its two texts.
@@ -387,9 +387,11 @@ func (d *DiffState) sideOptions(old bool) options {
 	if d.NoLineNumbers {
 		o.lineNumbers = LineNumbersOff
 	}
-	o.label = d.texts.NewText
-	if old {
-		o.label = d.texts.OldText
+	if d.texts != nil {
+		o.label = d.texts.NewText
+		if old {
+			o.label = d.texts.OldText
+		}
 	}
 	return o
 }

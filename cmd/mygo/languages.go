@@ -13,10 +13,88 @@ import (
 // language, which is the one every Windows there is knows.
 const langEnUS = 0x0409
 
-// desktopTag is the tag of a localized key of a desktop entry, which uses
-// underscores: zh-Hans is zh_Hans and pt-BR is pt_BR.
+// desktopTag is the locale of a localized key of a desktop entry, which a
+// launcher matches against the POSIX locale of the system,
+// lang_COUNTRY@MODIFIER: pt-BR is pt_BR, sr-Latn is sr@latin, and Chinese
+// names its script by a country, as zh-Hans is zh_CN and zh-Hant zh_TW. A
+// region of numbers, as the 419 of es-419, has no POSIX name, and is left
+// out.
 func desktopTag(tag string) string {
-	return strings.ReplaceAll(tag, "-", "_")
+	lang, script, region := tagParts(tag)
+	modifier := ""
+	switch {
+	case lang == "zh":
+		if region == "" {
+			region = "CN"
+			if scriptLanguage(tag) == "zh-hant" {
+				region = "TW"
+			}
+		}
+	case script != "" && !strings.EqualFold(script, defaultScripts[lang]) && defaultScripts[lang] != "":
+		switch strings.ToLower(script) {
+		case "latn":
+			modifier = "latin"
+		case "cyrl":
+			modifier = "cyrillic"
+		}
+	}
+	out := lang
+	if len(region) == 2 {
+		out += "_" + strings.ToUpper(region)
+	}
+	if modifier != "" {
+		out += "@" + modifier
+	}
+	return out
+}
+
+// defaultScripts are the scripts the languages written in more than one
+// are written in when their POSIX locale names no modifier: sr_RS is
+// Cyrillic, and sr_RS@latin Latin.
+var defaultScripts = map[string]string{
+	"az": "Latn", "be": "Cyrl", "bs": "Latn", "kk": "Cyrl", "mn": "Cyrl",
+	"sr": "Cyrl", "tg": "Cyrl", "uz": "Latn",
+}
+
+// lprojName is the name of the localization folder of a tag in an app
+// bundle, as Xcode names them: a language and its script or region, as
+// zh-Hans and pt-BR. The Chinese of a region is the script it writes,
+// except Hong Kong's, zh-HK, and a tag of three parts keeps the language
+// and the script: sr-Latn-RS is sr-Latn.
+func lprojName(tag string) string {
+	lang, script, region := tagParts(tag)
+	if lang == "zh" {
+		if strings.EqualFold(region, "HK") {
+			return "zh-HK"
+		}
+		if scriptLanguage(tag) == "zh-hant" {
+			return "zh-Hant"
+		}
+		return "zh-Hans"
+	}
+	switch {
+	case script != "":
+		return lang + "-" + strings.ToUpper(script[:1]) + strings.ToLower(script[1:])
+	case region != "":
+		return lang + "-" + strings.ToUpper(region)
+	}
+	return lang
+}
+
+// tagParts returns the language of a tag, lowercased, its script and its
+// region.
+func tagParts(tag string) (lang, script, region string) {
+	parts := strings.Split(tag, "-")
+	lang = strings.ToLower(parts[0])
+	for _, p := range parts[1:] {
+		switch {
+		case isScript(p) && script == "" && region == "":
+			script = p
+		case region == "" && (len(p) == 2 || len(p) == 3 && p[0] >= '0' && p[0] <= '9'):
+			region = p
+		}
+	}
+	return lang, script, region
 }
 
 // baseLanguage is the language of a tag, lowercased: zh-Hant-HK is zh.
@@ -120,23 +198,22 @@ func nsisLanguage(tag string) (string, bool) {
 // nsisLanguageMacros returns the lines that give the Windows installer the
 // languages of the app, one MUI_LANGUAGE macro each, which the installer
 // picks among by the language of the system. It is English alone for an app
-// that declares no language, or one whose languages NSIS does not know.
+// that declares no language.
 //
-// A language file that is not there fails the build, so the language files
-// of the NSIS installation of tool are checked where they can be found.
-func nsisLanguageMacros(c *Config, tool string) string {
+// A language NSIS has no language file of fails the build, as it would
+// fail makensis: the error names it. The language files of the NSIS
+// installation of tool are checked where they can be found.
+func nsisLanguageMacros(c *Config, tool string) (string, error) {
 	files := nsisLanguageFiles(tool)
 	seen := map[string]bool{}
 	var b strings.Builder
 	for _, l := range c.Languages {
 		name, ok := nsisLanguage(l.Tag)
 		if !ok {
-			warnf("The Windows installer has no %s language: NSIS does not know it", l.Tag)
-			continue
+			return "", fmt.Errorf("languages: the Windows installer cannot be in %s, which NSIS has no language file of: the installer of an app is in some of its languages, so leave it out of languages", l.Tag)
 		}
 		if files != "" && !fileExists(filepath.Join(files, name+".nlf")) {
-			warnf("The Windows installer has no %s language: NSIS has no %s.nlf", l.Tag, name)
-			continue
+			return "", fmt.Errorf("languages: the Windows installer cannot be in %s: the NSIS of %s has no %s.nlf in %s", l.Tag, tool, name, files)
 		}
 		if seen[name] {
 			continue
@@ -145,9 +222,9 @@ func nsisLanguageMacros(c *Config, tool string) string {
 		fmt.Fprintf(&b, "!insertmacro MUI_LANGUAGE %s\n", nsisString(name))
 	}
 	if b.Len() == 0 {
-		return "!insertmacro MUI_LANGUAGE \"English\"\n"
+		return "!insertmacro MUI_LANGUAGE \"English\"\n", nil
 	}
-	return b.String()
+	return b.String(), nil
 }
 
 // nsisLanguageFiles returns the directory of the language files of the NSIS
@@ -207,23 +284,22 @@ var windowsLanguages = map[string]uint16{
 
 // nsisLanguages are the languages NSIS names by its language files, which
 // MUI_LANGUAGE takes without the .nlf extension: the languages and scripts
-// of the tags of a system, with the language alone where NSIS has one.
+// of the tags of a system, with the language alone where NSIS has one. Only
+// the language files every NSIS 3 has are here.
 var nsisLanguages = map[string]string{
-	"af": "Afrikaans", "ar": "Arabic", "az": "Azerbaijani", "be": "Belarusian",
-	"bg": "Bulgarian", "bn": "Bengali", "bs": "Bosnian", "ca": "Catalan",
-	"cs": "Czech", "cy": "Welsh", "da": "Danish", "de": "German",
-	"el": "Greek", "en": "English", "es": "Spanish", "es-419": "SpanishInternational",
-	"et": "Estonian", "eu": "Basque", "fa": "Farsi", "fi": "Finnish",
-	"fr": "French", "ga": "Irish", "gl": "Galician", "he": "Hebrew",
-	"hi": "Hindi", "hr": "Croatian", "hu": "Hungarian", "hy": "Armenian",
-	"id": "Indonesian", "is": "Icelandic", "it": "Italian", "ja": "Japanese",
-	"ka": "Georgian", "kk": "Kazakh", "ko": "Korean", "lb": "Luxembourgish",
+	"af": "Afrikaans", "ar": "Arabic", "be": "Belarusian", "bg": "Bulgarian",
+	"bs": "Bosnian", "ca": "Catalan", "cs": "Czech", "cy": "Welsh",
+	"da": "Danish", "de": "German", "el": "Greek", "en": "English",
+	"es": "Spanish", "es-419": "SpanishInternational", "et": "Estonian", "eu": "Basque",
+	"fa": "Farsi", "fi": "Finnish", "fr": "French", "ga": "Irish",
+	"gl": "Galician", "he": "Hebrew", "hr": "Croatian", "hu": "Hungarian",
+	"hy": "Armenian", "id": "Indonesian", "is": "Icelandic", "it": "Italian",
+	"ja": "Japanese", "ka": "Georgian", "ko": "Korean", "lb": "Luxembourgish",
 	"lt": "Lithuanian", "lv": "Latvian", "mk": "Macedonian", "mn": "Mongolian",
 	"ms": "Malay", "nb": "Norwegian", "nl": "Dutch", "nn": "NorwegianNynorsk",
 	"no": "Norwegian", "pl": "Polish", "pt": "Portuguese", "pt-br": "PortugueseBR",
 	"ro": "Romanian", "ru": "Russian", "sk": "Slovak", "sl": "Slovenian",
 	"sq": "Albanian", "sr": "Serbian", "sr-latn": "SerbianLatin", "sv": "Swedish",
-	"sw": "Swahili", "th": "Thai", "tr": "Turkish", "uk": "Ukrainian",
-	"ur": "Urdu", "uz": "Uzbek", "vi": "Vietnamese", "zh": "SimpChinese",
-	"zh-hans": "SimpChinese", "zh-hant": "TradChinese",
+	"th": "Thai", "tr": "Turkish", "uk": "Ukrainian", "uz": "Uzbek",
+	"vi": "Vietnamese", "zh": "SimpChinese", "zh-hans": "SimpChinese", "zh-hant": "TradChinese",
 }

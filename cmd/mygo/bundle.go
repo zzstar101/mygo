@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -82,7 +83,7 @@ func writeLocalizations(c *Config, resources string) error {
 		if name == c.Name {
 			continue
 		}
-		dir := filepath.Join(resources, l.Tag+".lproj")
+		dir := filepath.Join(resources, lprojName(l.Tag)+".lproj")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
@@ -206,10 +207,12 @@ func infoPlist(c *Config, executable, icon, iconName string) []byte {
 	if len(c.Languages) > 0 {
 		// The first language is the app's own: the one the system falls
 		// back to, and the development region of the bundle.
-		d["CFBundleDevelopmentRegion"] = c.Languages[0].Tag
+		d["CFBundleDevelopmentRegion"] = lprojName(c.Languages[0].Tag)
 		var locales []any
 		for _, l := range c.Languages {
-			locales = append(locales, l.Tag)
+			if name := lprojName(l.Tag); !slices.Contains(locales, any(name)) {
+				locales = append(locales, name)
+			}
 		}
 		d["CFBundleLocalizations"] = locales
 	}

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/internal/platform"
 )
@@ -47,10 +48,11 @@ type Application struct {
 	// localeGeneration counts the SetLocale calls that changed the locale.
 	// The work they queue runs for the last one only.
 	localeGeneration uint64
-	// rememberLocale is whether RememberLocale keeps the tag SetLocale set
-	// across runs.
-	rememberLocale bool
-	finished       sync.Once
+	// shownLocale is the locale the app shows, a string, as the windows
+	// and the listeners last heard of it, or nothing before anything asked.
+	// The main thread sets it; the menus read it from any goroutine.
+	shownLocale atomic.Value
+	finished    sync.Once
 
 	// quitting is only touched on the main thread.
 	quitting    bool
@@ -105,9 +107,6 @@ func (a *Application) Run() error {
 	a.running = true
 	a.mu.Unlock()
 	go cleanUpdateLeftovers()
-
-	// The language the app showed last time, when it remembers it.
-	a.restoreLocalePreference()
 
 	b := backend()
 	if err := b.Init(appHandler{}, platform.AppOptions{
@@ -409,26 +408,35 @@ func (a *Application) SetBadgeCount(n int) {
 	a.Dock.SetBadge(label)
 }
 
-// Locale returns the locale the app shows: the tag SetLocale set, or the
-// user's preferred locale, e.g. "en-US". The pages of web windows read it
-// as mygo.locale.
+// Locale returns the locale the app shows, e.g. "zh-Hans" or "en-US": the
+// tag SetLocale set, or the user's preferred language while it set none.
+// It is the language the controls of the native UI say their own texts in,
+// and the one the pages of web windows read as mygo.locale. SystemLocale
+// is the user's preferred language whatever the app shows.
 func (a *Application) Locale() string {
-	return onMainValue(func() string { return a.localeInEffect() })
+	return onMainValue(a.currentLocale)
+}
+
+// SystemLocale returns the language the user prefers, as the system's
+// settings put it first, e.g. "en-US", whatever SetLocale set: on macOS
+// the first of the preferred languages, on Windows the display language,
+// on Linux the language of the environment (LC_ALL, LC_MESSAGES, LANG),
+// in a browser navigator.language.
+func (a *Application) SystemLocale() string {
+	return onMainValue(func() string { return backend().App().Locale() })
 }
 
 // SetLocale makes tag, a language tag such as "zh-Hans" or "zh-Hant-TW",
 // the locale the app shows, from any goroutine: the controls of the native
 // UI say their own texts in its language, the pages of web windows hear the
 // mygo:locale event, and OnLocaleChanged tells the app to say its own in
-// it. An empty tag follows the user's preferred locale again, which is the
-// default.
-//
-// When the app remembers the language it shows (RememberLocale), the tag is
-// kept across runs, and an empty tag forgets it.
+// it. An empty tag follows the user's preferred language again, which is
+// the default.
 //
 // Several calls made before the main thread gets to them are folded into
-// one: the app shows, hears and keeps the last tag only, so that a language
-// switched in quick steps is painted once.
+// one: the app shows and hears the last tag only, so that a language
+// switched in quick steps is painted once. A tag that changes nothing the
+// app shows, as "en-US" while the user prefers en-US, tells nobody.
 func (a *Application) SetLocale(tag string) {
 	tag = strings.TrimSpace(tag)
 	a.mu.Lock()
@@ -442,47 +450,58 @@ func (a *Application) SetLocale(tag string) {
 	a.mu.Unlock()
 	postMain(func() {
 		// The locale another goroutine set in the meantime is the one the
-		// app shows, and the one it remembers: the tag of this call may be
-		// older than it.
+		// app shows: the tag of this call may be older than it.
 		a.mu.Lock()
-		if a.localeGeneration != generation {
-			a.mu.Unlock()
-			return
-		}
-		own := a.locale
+		stale := a.localeGeneration != generation
 		a.mu.Unlock()
-		locale := a.localeInEffect()
-		a.saveLocalePreference(own)
-		localeChanged(locale)
-		fire1(&a.onLocaleChanged, locale)
+		if !stale {
+			a.updateLocale()
+		}
 	})
 }
 
-// localeChangedFromSystem tells the app that the user's preferred locale
-// changed. The app follows it while it shows no locale of its own, set with
-// SetLocale. Main thread only.
+// localeChangedFromSystem tells the app that the user's preferred language
+// may have changed. The app follows it while it shows no locale of its
+// own, set with SetLocale.
 func (a *Application) localeChangedFromSystem() {
-	postMain(func() {
-		a.mu.Lock()
-		own := a.locale != ""
-		a.mu.Unlock()
-		if own {
-			return
-		}
-		locale := a.localeInEffect()
-		localeChanged(locale)
-		fire1(&a.onLocaleChanged, locale)
-	})
+	postMain(a.updateLocale)
 }
 
-// OnLocaleChanged is called with the locale the app shows when SetLocale
-// changes it. It returns a function that stops the listener.
+// updateLocale tells the windows and the listeners the locale the app
+// shows, when it is not the one they heard of last. Main thread only.
+func (a *Application) updateLocale() {
+	before := a.currentLocale()
+	locale := a.localeInEffect()
+	if locale == before {
+		return
+	}
+	a.shownLocale.Store(locale)
+	localeChanged(locale)
+	relabelMenus()
+	fire1(&a.onLocaleChanged, locale)
+}
+
+// OnLocaleChanged is called with the locale the app shows when it changed:
+// SetLocale set another, or the user's preferred language changed while
+// the app follows it. It returns a function that stops the listener.
 func (a *Application) OnLocaleChanged(fn func(locale string)) (off func()) {
 	return a.onLocaleChanged.add(fn, false)
 }
 
-// localeInEffect returns the locale the app shows: SetLocale's, or the
-// user's preferred locale. Main thread only.
+// currentLocale returns the locale the app shows, as the windows last heard
+// of it, which costs nothing after the first call: the controls of the
+// native UI read it as they build. Main thread only.
+func (a *Application) currentLocale() string {
+	if v, _ := a.shownLocale.Load().(string); v != "" {
+		return v
+	}
+	v := a.localeInEffect()
+	a.shownLocale.Store(v)
+	return v
+}
+
+// localeInEffect asks for the locale the app shows: SetLocale's, or the
+// user's preferred language.
 func (a *Application) localeInEffect() string {
 	a.mu.Lock()
 	tag := a.locale

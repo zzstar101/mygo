@@ -256,9 +256,8 @@ again.
 `go build` and `mygo dev` builds are, `mygo build` builds are not, and
 `MYGO_ENV=production` makes any build behave like one. `App.IsPackaged()`
 reports whether it runs from an app bundle, and `App.Locale()` returns the
-user's language, such as `"en-US"`. `App.SetLocale` changes the language the
-app shows, and `App.RememberLocale` keeps the one its user picked across
-runs; [Languages](i18n.md) covers both.
+language the app shows, such as `"en-US"`: the user's, `App.SystemLocale()`,
+until `App.SetLocale` changes it; [Languages](i18n.md) covers both.
 
 ## The Dock and the taskbar
 

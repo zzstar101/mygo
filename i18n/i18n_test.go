@@ -19,7 +19,6 @@ func TestMatch(t *testing.T) {
 		"zh_HK.UTF-8": "zh-Hant",
 		"zh-MO":       "zh-Hant",
 		"SV_se":       "sv",
-		"es-419":      "",
 		"sr-Latn-RS":  "",
 		"":            "",
 		"C":           "",
@@ -66,14 +65,24 @@ func TestMatch(t *testing.T) {
 	if got := Match("en-US", []string{"en-US", "en-GB"}); got != "en-US" {
 		t.Errorf("Match(en-US) = %q, want en-US", got)
 	}
-	// Spanish of the two sides of the Atlantic are not variants of each
-	// other: neither region matches, until the app has the Spanish the
-	// system asked for.
-	if got := Match("es-419", []string{"en", "es-ES"}); got != "" {
-		t.Errorf("Match(es-419, en and es-ES) = %q, want no match", got)
+	// A regional variant falls back to any variant of its language, before
+	// the app's own language: the Spanish of Spain suits Mexico.
+	if got := Match("es-MX", []string{"en", "es-ES"}); got != "es-ES" {
+		t.Errorf("Match(es-MX, en and es-ES) = %q, want es-ES", got)
 	}
-	if got := Match("es-MX", []string{"en", "es-ES"}); got != "" {
-		t.Errorf("Match(es-MX, en and es-ES) = %q, want no match", got)
+	if got := Match("es-419", []string{"en", "es-ES"}); got != "es-ES" {
+		t.Errorf("Match(es-419, en and es-ES) = %q, want es-ES", got)
+	}
+	// The Spanish of Latin America suits its countries better than the
+	// Spanish itself, which suits them better than the Spanish of Spain.
+	if got := Match("es-MX", []string{"es", "es-419", "es-ES"}); got != "es-419" {
+		t.Errorf("Match(es-MX, es, es-419 and es-ES) = %q, want es-419", got)
+	}
+	if got := Match("es-AR", []string{"es", "es-ES"}); got != "es" {
+		t.Errorf("Match(es-AR, es and es-ES) = %q, want es", got)
+	}
+	if got := Match("es-419", []string{"es-ES", "es-MX"}); got != "es-MX" {
+		t.Errorf("Match(es-419, es-ES and es-MX) = %q, want es-MX", got)
 	}
 	if got := Match("es-419", []string{"en", "es-419"}); got != "es-419" {
 		t.Errorf("Match(es-419, en and es-419) = %q, want es-419", got)
@@ -85,6 +94,19 @@ func TestMatch(t *testing.T) {
 	// Spanish the app has suits it.
 	if got := Match("es", []string{"en", "es-ES"}); got != "es-ES" {
 		t.Errorf("Match(es, en and es-ES) = %q, want es-ES", got)
+	}
+	// The old codes of a language are the language.
+	for locale, want := range map[string][2]string{
+		"nb-NO":       {"no", "no"},
+		"no_NO.UTF-8": {"nb", "nb"},
+		"iw-IL":       {"he", "he"},
+		"he":          {"iw", "iw"},
+		"in_ID":       {"id", "id"},
+		"tl":          {"fil", "fil"},
+	} {
+		if got := Match(locale, []string{"en", want[0]}); got != want[1] {
+			t.Errorf("Match(%s, en and %s) = %q, want %q", locale, want[0], got, want[1])
+		}
 	}
 	// Portuguese variants still fall back to each other.
 	if got := Match("pt-PT", []string{"en", "pt-BR"}); got != "pt-BR" {
@@ -98,6 +120,9 @@ func TestBaseLanguage(t *testing.T) {
 		"zh_Hant": "zh",
 		"en":      "en",
 		"EN-us":   "en",
+		"iw-IL":   "he",
+		"no":      "nb",
+		"C":       "",
 		"":        "",
 	} {
 		if got := BaseLanguage(tag); got != want {

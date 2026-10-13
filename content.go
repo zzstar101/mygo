@@ -50,7 +50,7 @@ func (w *Window) attachContent() {
 		Escape:        w.escape,
 		IsDark:        func() bool { return backend().Theme().IsDark() },
 		Preferences:   func() platform.Preferences { return backend().Theme().Preferences() },
-		Locale:        func() string { return App.localeInEffect() },
+		Locale:        func() string { return App.currentLocale() },
 		UIFont:        func() string { return backend().Theme().UIFont() },
 		FontRendering: func() platform.FontRendering { return backend().Theme().FontRendering() },
 		TitleBar: func() platform.TitleBar {
@@ -295,31 +295,37 @@ func contentThemeChanged() {
 }
 
 // localeChanged tells every window that the locale the app shows changed:
-// its pages hear the mygo:locale event, and a window showing native UI
-// builds its Content anew, with the texts of the language. Main thread
-// only.
+// a window showing native UI builds its Content anew, with the texts of
+// the language, and its pages, and those of its web views, hear the
+// mygo:locale event; the pages they load later read the locale at document
+// start. Main thread only.
 func localeChanged(locale string) {
 	msg, err := encodeEvent(bridge.LocaleEvent, locale)
 	if err != nil {
 		return
 	}
 	for _, w := range Windows() {
-		w.contentChanged()
-		w.deliver(msg)
+		if c := w.conn; c != nil && c.LocaleChanged != nil {
+			c.LocaleChanged()
+		} else {
+			w.contentChanged()
+		}
+		for _, p := range w.pages() {
+			if p.native != nil {
+				p.native.SetUserScripts(p.pageScripts())
+			}
+			p.enqueue(msg, true)
+		}
 	}
 }
 
-// deliver hands a message to the pages of a window: its own page, or the
-// web views it shows native UI in. Main thread only.
-func (w *Window) deliver(msg message) {
-	if w.content != nil {
-		windows.Lock()
-		views := append([]*Window(nil), w.webViews...)
-		windows.Unlock()
-		for _, v := range views {
-			v.enqueue(msg, true)
-		}
-		return
+// pages returns the windows of the pages a window shows: its own page, or
+// the web views it shows native UI with. Main thread only.
+func (w *Window) pages() []*Window {
+	if w.content == nil {
+		return []*Window{w}
 	}
-	w.enqueue(msg, true)
+	windows.Lock()
+	defer windows.Unlock()
+	return append([]*Window(nil), w.webViews...)
 }

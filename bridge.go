@@ -155,15 +155,26 @@ func (w *Window) sendTitleBar() {
 	}
 }
 
-// sendLocale tells the pages of a window the locale the app shows. The
-// bridge configuration tells the first page at document start; this keeps
-// the current page, and later ones, up to date. Main thread only.
+// pageScripts are the scripts a page of the window gets at document start:
+// the bridge, the preferences of the page and the preload script.
+func (w *Window) pageScripts() []platform.UserScript {
+	scripts := []platform.UserScript{{Source: w.bridgeScript()}, {Source: preferencesScript()}}
+	if w.preload != "" {
+		scripts = append(scripts, platform.UserScript{Source: w.preload})
+	}
+	return scripts
+}
+
+// sendLocale tells the page of a window the locale the app shows, which
+// the bridge configuration told it at document start: a page that started
+// loading as the locale changed may have the one before. The bridge tells
+// its listeners only of a locale it did not have. Main thread only.
 func (w *Window) sendLocale() {
 	if w.native == nil {
 		return
 	}
-	if msg, err := encodeEvent(bridge.LocaleEvent, App.Locale()); err == nil {
-		w.deliver(msg)
+	if msg, err := encodeEvent(bridge.LocaleEvent, App.currentLocale()); err == nil {
+		w.enqueue(msg, true)
 	}
 }
 

@@ -21,22 +21,33 @@ func utf16Of(s string) []byte {
 }
 
 func TestLanguageTagForms(t *testing.T) {
-	for _, tc := range []struct{ tag, desktop, base, script string }{
-		{"en", "en", "en", "en"},
-		{"en-GB", "en_GB", "en", "en"},
-		{"zh-Hans", "zh_Hans", "zh", "zh-hans"},
-		{"zh-Hant-HK", "zh_Hant_HK", "zh", "zh-hant"},
-		{"zh", "zh", "zh", "zh-hans"},
-		{"zh-CN", "zh_CN", "zh", "zh-hans"},
-		{"zh-SG", "zh_SG", "zh", "zh-hans"},
-		{"zh-TW", "zh_TW", "zh", "zh-hant"},
-		{"zh-HK", "zh_HK", "zh", "zh-hant"},
-		{"zh-MO", "zh_MO", "zh", "zh-hant"},
-		{"pt-BR", "pt_BR", "pt", "pt"},
-		{"es-419", "es_419", "es", "es"},
+	for _, tc := range []struct{ tag, desktop, lproj, base, script string }{
+		{"en", "en", "en", "en", "en"},
+		{"en-GB", "en_GB", "en-GB", "en", "en"},
+		{"zh-Hans", "zh_CN", "zh-Hans", "zh", "zh-hans"},
+		{"zh-Hant", "zh_TW", "zh-Hant", "zh", "zh-hant"},
+		{"zh-Hant-HK", "zh_HK", "zh-HK", "zh", "zh-hant"},
+		{"zh-Hant-TW", "zh_TW", "zh-Hant", "zh", "zh-hant"},
+		{"zh-Hans-SG", "zh_SG", "zh-Hans", "zh", "zh-hans"},
+		{"zh", "zh_CN", "zh-Hans", "zh", "zh-hans"},
+		{"zh-CN", "zh_CN", "zh-Hans", "zh", "zh-hans"},
+		{"zh-SG", "zh_SG", "zh-Hans", "zh", "zh-hans"},
+		{"zh-TW", "zh_TW", "zh-Hant", "zh", "zh-hant"},
+		{"zh-HK", "zh_HK", "zh-HK", "zh", "zh-hant"},
+		{"zh-MO", "zh_MO", "zh-Hant", "zh", "zh-hant"},
+		{"pt-BR", "pt_BR", "pt-BR", "pt", "pt"},
+		{"es-419", "es", "es-419", "es", "es"},
+		{"sr-Latn", "sr@latin", "sr-Latn", "sr", "sr-latn"},
+		{"sr-Latn-RS", "sr_RS@latin", "sr-Latn", "sr", "sr-latn"},
+		{"sr-Cyrl-RS", "sr_RS", "sr-Cyrl", "sr", "sr-cyrl"},
+		{"uz-Cyrl", "uz@cyrillic", "uz-Cyrl", "uz", "uz-cyrl"},
+		{"de-CH", "de_CH", "de-CH", "de", "de"},
 	} {
 		if got := desktopTag(tc.tag); got != tc.desktop {
 			t.Errorf("desktopTag(%q) = %q, want %q", tc.tag, got, tc.desktop)
+		}
+		if got := lprojName(tc.tag); got != tc.lproj {
+			t.Errorf("lprojName(%q) = %q, want %q", tc.tag, got, tc.lproj)
 		}
 		if got := baseLanguage(tc.tag); got != tc.base {
 			t.Errorf("baseLanguage(%q) = %q, want %q", tc.tag, got, tc.base)
@@ -93,7 +104,12 @@ func TestNSISLanguage(t *testing.T) {
 		{"pt-BR", "PortugueseBR", true},
 		{"pt", "Portuguese", true},
 		{"fr", "French", true},
+		{"sr-Latn-RS", "SerbianLatin", true},
+		{"es-419", "SpanishInternational", true},
+		{"nb-NO", "Norwegian", true},
 		{"tlh", "", false},
+		{"sw", "", false}, // Swahili, which NSIS 3 has no language file of
+		{"bn", "", false},
 	} {
 		name, ok := nsisLanguage(tc.tag)
 		if name != tc.name || ok != tc.ok {
@@ -108,16 +124,35 @@ func TestNSISLanguage(t *testing.T) {
 // share one appear once.
 func TestNSISLanguageMacros(t *testing.T) {
 	tool := filepath.Join(t.TempDir(), "makensis")
-	if got := nsisLanguageMacros(&Config{}, tool); got != "!insertmacro MUI_LANGUAGE \"English\"\n" {
-		t.Errorf("an app without languages: %q", got)
+	if got, err := nsisLanguageMacros(&Config{}, tool); err != nil || got != "!insertmacro MUI_LANGUAGE \"English\"\n" {
+		t.Errorf("an app without languages: %q, %v", got, err)
 	}
-	c := &Config{Languages: []Language{{Tag: "zh-Hans"}, {Tag: "zh-CN"}, {Tag: "zh-Hant"}, {Tag: "fr"}, {Tag: "tlh"}}}
+	c := &Config{Languages: []Language{{Tag: "zh-Hans"}, {Tag: "zh-CN"}, {Tag: "zh-Hant"}, {Tag: "fr"}}}
 	want := `!insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "TradChinese"
 !insertmacro MUI_LANGUAGE "French"
 `
-	if got := nsisLanguageMacros(c, tool); got != want {
-		t.Errorf("the installer languages are\n%swant\n%s", got, want)
+	if got, err := nsisLanguageMacros(c, tool); err != nil || got != want {
+		t.Errorf("the installer languages are\n%swant\n%s (%v)", got, want, err)
+	}
+	// A language NSIS has no file of fails the build, and says which.
+	c.Languages = append(c.Languages, Language{Tag: "tlh"})
+	if _, err := nsisLanguageMacros(c, tool); err == nil || !strings.Contains(err.Error(), "tlh") {
+		t.Errorf("a language NSIS does not know: %v", err)
+	}
+	// So does one whose file the NSIS of the build lacks.
+	files := filepath.Join(filepath.Dir(tool), "Contrib", "Language files")
+	if err := os.MkdirAll(files, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"English", "SimpChinese"} {
+		if err := os.WriteFile(filepath.Join(files, name+".nlf"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Languages = []Language{{Tag: "zh-Hans"}, {Tag: "fr"}}
+	if _, err := nsisLanguageMacros(c, tool); err == nil || !strings.Contains(err.Error(), "French.nlf") {
+		t.Errorf("a language file the NSIS lacks: %v", err)
 	}
 }
 
@@ -235,10 +270,39 @@ func TestLanguagePackaging(t *testing.T) {
 			t.Errorf("the desktop entry has no %q:\n%s", want, entry)
 		}
 	}
-	for _, unwanted := range []string{"Name[zh_Hans]", "Comment[zh_Hans]", "Comment[fr]", "Keywords[zh_Hans]", "Name[fr]=Notes\n"} {
+	for _, unwanted := range []string{"Name[zh_CN]", "Name[zh_Hans]", "Comment[zh_CN]", "Comment[fr]", "Keywords[zh_CN]", "Name[fr]=Notes\n"} {
 		if strings.Contains(entry, unwanted) {
 			t.Errorf("the desktop entry has %q:\n%s", unwanted, entry)
 		}
+	}
+
+	// The keys of a language are the POSIX locales a launcher matches: the
+	// name of zh-Hant is zh_TW's, and es and es-419 share es.
+	c2 := &Config{Name: "Notes", Languages: []Language{
+		{Tag: "en"}, {Tag: "zh-Hant", Name: "筆記"}, {Tag: "sr-Latn", Name: "Beleške"},
+		{Tag: "es", Name: "Notas"}, {Tag: "es-419", Name: "Apuntes"},
+	}}
+	c2.applyDefaults()
+	entry = linuxDesktopEntry(c2, "notes", "notes")
+	for _, want := range []string{"Name=Notes\n", "Name[zh_TW]=筆記\n", "Name[sr@latin]=Beleške\n", "Name[es]=Notas\n"} {
+		if !strings.Contains(entry, want) {
+			t.Errorf("the desktop entry has no %q:\n%s", want, entry)
+		}
+	}
+	if strings.Contains(entry, "Apuntes") || strings.Contains(entry, "zh_Hant") {
+		t.Errorf("the desktop entry has a key no launcher matches, or one twice:\n%s", entry)
+	}
+
+	// macOS: the folder of Hong Kong's Chinese is zh-HK.lproj, as Xcode's.
+	hk := t.TempDir()
+	if err := writeLocalizations(&Config{Name: "Notes", Languages: []Language{{Tag: "zh-Hant-HK", Name: "筆記"}}}, hk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(hk, "zh-HK.lproj", "InfoPlist.strings")); err != nil {
+		t.Errorf("no localization of zh-Hant-HK: %v", err)
+	}
+	if p := string(infoPlist(&Config{Name: "Notes", Languages: []Language{{Tag: "zh-Hant-HK"}, {Tag: "zh-HK"}}}, "Notes", "", "")); strings.Count(p, "<string>zh-HK</string>") != 2 {
+		t.Errorf("the Info.plist names zh-HK other than once as the region and once as a localization:\n%s", p)
 	}
 
 	// Windows: one string table per language, and the languages listed.

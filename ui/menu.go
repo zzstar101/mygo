@@ -493,7 +493,7 @@ func (rt *engine) editCommands(s *state) []editItem {
 	if s.textScope != 0 && rt.selection.scope == s.textScope {
 		_, _, selected = rt.textSelectionBounds()
 	}
-	tx := textsFor(rt.locale())
+	tx := rt.ownTexts()
 	type command = editItem
 	var (
 		undo      = command{tx.Undo, "undo", len(ed.undo) > 0}

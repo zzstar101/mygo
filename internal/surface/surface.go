@@ -34,8 +34,8 @@ type Conn struct {
 	IsDark      func() bool
 	Preferences func() platform.Preferences
 	// Locale returns the locale the app shows (App.SetLocale, or the
-	// user's preferred locale), whose changes Changed tells the content
-	// of.
+	// user's preferred language), whose changes LocaleChanged tells the
+	// content of. It costs nothing: the content may read it every frame.
 	Locale func() string
 	// UIFont returns the family of the desktop's interface font where the
 	// system's text stack does not know it (Linux), else "".
@@ -80,6 +80,9 @@ type Conn struct {
 	// TitleBarChanged when TitleBar does.
 	ThemeChanged    func()
 	TitleBarChanged func()
+	// LocaleChanged is called when Locale changed, for the content to
+	// build its frame anew in the language.
+	LocaleChanged func()
 	// Capture renders the content as it is now into premultiplied RGBA.
 	Capture func() (width, height int, rgba []byte)
 	// ToggleDevTools opens or closes the content's inspector, for the

@@ -369,7 +369,7 @@ func (f *finder) replacement(text string, i int) string {
 
 // status is what the bar says of the matches, in the texts of the language
 // the app shows.
-func (f *finder) status(tx ui.Texts) string {
+func (f *finder) status(tx *ui.Texts) string {
 	switch {
 	case f.err != nil:
 		return tx.Invalid

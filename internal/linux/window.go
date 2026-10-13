@@ -289,24 +289,7 @@ func (w *window) createWebView() {
 	w.web = webkitWebViewNewWithUserContentManager(w.ucm)
 	webkitUserContentManagerRegisterHandler(w.ucm, cs("mygo"))
 	connect(w.ucm, "script-message-received::mygo", cbScriptMessage, data)
-	for _, s := range o.UserScripts {
-		frames, when := int32(1), int32(0) // top frame, document start
-		if s.AllFrames {
-			frames = 0
-		}
-		if s.AtDocumentEnd {
-			when = 1
-		}
-		script := webkitUserScriptNew(cs(s.Source), frames, when, 0, 0)
-		webkitUserContentManagerAddScript(w.ucm, script)
-		webkitUserScriptUnref(script)
-	}
-	if w.controls != nil {
-		// After the bridge, which it tells; top frame, document start.
-		script := webkitUserScriptNew(cs(w.titleBarScript()), 1, 0, 0, 0)
-		webkitUserContentManagerAddScript(w.ucm, script)
-		webkitUserScriptUnref(script)
-	}
+	w.addUserScripts()
 
 	settings := webkitWebViewGetSettings(w.web)
 	webkitSettingsSetEnableDeveloperExtras(settings, o.DevTools)
@@ -1012,6 +995,38 @@ func (w *window) CanGoBack() bool    { return webkitWebViewCanGoBack(w.web) }
 func (w *window) CanGoForward() bool { return webkitWebViewCanGoForward(w.web) }
 func (w *window) URL() string        { return goStr(webkitWebViewGetURI(w.web)) }
 func (w *window) IsLoading() bool    { return webkitWebViewIsLoading(w.web) }
+
+// addUserScripts gives the content manager the scripts of the options, and
+// the script that tells the bridge the room of the window controls.
+func (w *window) addUserScripts() {
+	for _, s := range w.opts.UserScripts {
+		frames, when := int32(1), int32(0) // top frame, document start
+		if s.AllFrames {
+			frames = 0
+		}
+		if s.AtDocumentEnd {
+			when = 1
+		}
+		script := webkitUserScriptNew(cs(s.Source), frames, when, 0, 0)
+		webkitUserContentManagerAddScript(w.ucm, script)
+		webkitUserScriptUnref(script)
+	}
+	if w.controls != nil {
+		// After the bridge, which it tells; top frame, document start.
+		script := webkitUserScriptNew(cs(w.titleBarScript()), 1, 0, 0, 0)
+		webkitUserContentManagerAddScript(w.ucm, script)
+		webkitUserScriptUnref(script)
+	}
+}
+
+func (w *window) SetUserScripts(scripts []platform.UserScript) {
+	if w.closed || w.ucm == 0 {
+		return
+	}
+	w.opts.UserScripts = scripts
+	webkitUserContentManagerRemoveAllScripts(w.ucm)
+	w.addUserScripts()
+}
 
 func (w *window) Eval(js string) {
 	if webkitWebViewEvaluateJavascript != nil {
