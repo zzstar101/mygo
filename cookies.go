@@ -11,47 +11,60 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 )
 
-// CookieSameSite controls when a cookie accompanies cross-site requests.
-// Empty requests Lax on Set and means unknown or absent on reads.
+// CookieSameSite says whether a cookie goes along with requests from
+// other sites. Cookies.Set takes an empty one as Lax; a cookie List
+// returns has an empty one when the engine does not say.
 type CookieSameSite string
 
 const (
-	CookieSameSiteLax    CookieSameSite = "lax"
+	// CookieSameSiteLax sends the cookie along when the user navigates
+	// from another site, but not with other requests from it.
+	CookieSameSiteLax CookieSameSite = "lax"
+	// CookieSameSiteStrict sends the cookie only with the site's own
+	// requests.
 	CookieSameSiteStrict CookieSameSite = "strict"
-	CookieSameSiteNone   CookieSameSite = "none"
+	// CookieSameSiteNone sends the cookie with every request; the cookie
+	// must be Secure.
+	CookieSameSiteNone CookieSameSite = "none"
 )
 
-// Cookie is a snapshot of an HTTP cookie in the app's webview data store.
-// It is not a net/http cookie jar entry and does not include partition keys.
+// Cookie is a cookie of the app's pages. Its name, domain and path
+// identify it.
 type Cookie struct {
 	Name  string
 	Value string
-	// Domain is a host or a leading-dot domain including its subdomains.
-	// Use ASCII/punycode without a scheme, port, or trailing dot.
+	// Domain is the host the cookie is sent to, such as "example.com", or
+	// with a leading dot, ".example.com", the domain whose subdomains get
+	// it too. It is in lowercase ASCII (punycode), without a port.
 	Domain string
-	// Path defaults to "/" when setting or identifying a cookie.
+	// Path is the path the cookie is sent for; empty means "/".
 	Path string
-	// Expires is zero for a session cookie, otherwise UTC whole seconds.
-	// Persistence and lifetime caps remain controlled by the engine.
+	// Expires is when the cookie expires, in whole seconds; zero for a
+	// cookie that lasts until the app quits.
 	Expires  time.Time
 	Secure   bool
 	HTTPOnly bool
 	SameSite CookieSameSite
 }
 
-// CookiesModule manages the default cookie store shared by the app's pages.
-// Methods are safe from any goroutine, including main-thread listeners, once
-// the app is running; main-thread calls before App.Run panic. Windows needs an
-// open web-page window (possibly initializing); native UI does not supply one.
-// Cookies can contain credentials. Do not expose this module wholesale to pages.
+// CookiesModule reads and changes the cookies of the app's pages. Use the
+// Cookies singleton.
 type CookiesModule struct{}
 
-// Cookies manages the application's default webview cookie store.
+// Cookies reads and changes the cookies the app's pages share, HTTPOnly
+// ones included, e.g. to sign the user in with a token the backend got:
+//
+//	err := mygo.Cookies.Set(mygo.Cookie{Name: "session", Value: token,
+//		Domain: "example.com", Secure: true, HTTPOnly: true})
+//
+// The methods are safe from any goroutine once the app is running; on the
+// main thread the app keeps handling events while they wait. On Windows
+// they need a window that shows a web page. Cookies may carry the user's
+// credentials: bind a backend method that does what the page needs rather
+// than giving the page the cookies.
 var Cookies CookiesModule
 
-// List returns all native-visible cookies, including HTTPOnly, sorted by domain,
-// path, then name. An empty store returns an empty slice. This snapshot is not
-// a complete export of browser metadata or partitions.
+// List returns the cookies, sorted by domain, path and name.
 func (CookiesModule) List() ([]Cookie, error) {
 	needsApp("Cookies.List")
 	result := cookieCall(func(done func(cookieResult)) {
@@ -75,9 +88,11 @@ func (CookiesModule) List() ([]Cookie, error) {
 	return result.cookies, result.err
 }
 
-// Get returns an exact name/domain/path match. Domain is lowercased and empty
-// path means "/"; a leading dot matters. Absence is not an error. Multiple
-// indistinguishable native entries return an ambiguity error.
+// Get returns the cookie of name, domain and path, and whether there is
+// one. The domain is matched without regard to case and with its leading
+// dot, if any: "example.com" and ".example.com" are different cookies. An
+// empty path is "/". It fails when the engine keeps several such
+// cookies, e.g. partitioned ones of the same name.
 func (CookiesModule) Get(name, domain, path string) (Cookie, bool, error) {
 	needsApp("Cookies.Get")
 	key, err := normalizeCookieKey(name, domain, path)
@@ -102,10 +117,13 @@ func (CookiesModule) Get(name, domain, path string) (Cookie, bool, error) {
 	return result, found, nil
 }
 
-// Set adds or replaces an exact-key cookie. Empty path becomes "/", empty
-// SameSite becomes Lax, and None requires Secure. A past nonzero Expires deletes
-// the cookie. Nil error means completed or accepted, not a disk flush: browser
-// policy may reject, shorten, or evict it.
+// Set adds the cookie, or replaces the one of the same name, domain and
+// path. An empty path is "/" and an empty SameSite Lax; SameSite None
+// needs Secure, as do the __Secure- and __Host- name prefixes. The value
+// must be made of the characters a Set-Cookie header allows: encode
+// others, e.g. with base64.RawURLEncoding. An Expires in the past deletes
+// the cookie. The engine may still drop the cookie or expire it earlier,
+// as it would one a server set.
 func (CookiesModule) Set(c Cookie) error {
 	needsApp("Cookies.Set")
 	c, err := normalizeCookie(c)
@@ -121,8 +139,8 @@ func (CookiesModule) Set(c Cookie) error {
 	}).err
 }
 
-// Delete removes exactly this name/domain/path, if present. Domain is lowercased
-// and empty path means "/". It is not URL deletion and never deletes siblings.
+// Delete deletes the cookie of name, domain and path, matched as Get
+// matches them. Deleting a cookie that does not exist is not an error.
 func (CookiesModule) Delete(name, domain, path string) error {
 	needsApp("Cookies.Delete")
 	key, err := normalizeCookieKey(name, domain, path)
@@ -134,10 +152,8 @@ func (CookiesModule) Delete(name, domain, path string) error {
 	}).err
 }
 
-// Clear deletes a cookie snapshot, not localStorage, IndexedDB, caches, or other
-// browsing data. It is not atomic: pages can create cookies concurrently. Every
-// deletion is attempted and errors are joined (partial success is possible).
-// App.ClearBrowsingData clears all kinds of browsing data instead.
+// Clear deletes every cookie, and nothing else the pages stored, unlike
+// App.ClearBrowsingData. Pages may set new ones meanwhile.
 func (CookiesModule) Clear() error {
 	needsApp("Cookies.Clear")
 	values, err := Cookies.List()
@@ -161,7 +177,9 @@ type cookieResult struct {
 	err     error
 }
 
-// Accessed only on main. Native completions may arrive after shutdown.
+// cookieCalls are the calls waiting for the backend, which may never
+// complete them once the app quits: stopCookieCalls fails them. It is
+// used on the main thread only.
 var cookieCalls = struct {
 	stopped bool
 	next    uint64

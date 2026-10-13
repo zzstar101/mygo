@@ -4,37 +4,38 @@ package windows
 
 import (
 	"fmt"
-	"github.com/egoist/mygo/internal/platform"
 	"math"
 	"strings"
 	"time"
 	"unsafe"
+
+	"github.com/egoist/mygo/internal/platform"
 )
 
 // Mechanically checked against Microsoft's Microsoft.Web.WebView2 NuGet
 // 1.0.4191.47, build/native/include/WebView2.h (C interface vtable order).
 // https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4191.47/microsoft.web.webview2.1.0.4191.47.nupkg
 const (
-	wv2GetCookieManager = 66
-	cookieManagerCreate = 3
-	cookieManagerGet    = 5
-	cookieManagerAdd    = 6
-	cookieManagerDelete = 7
-	cookieListCount     = 3
-	cookieListValue     = 4
-	cookieGetName       = 3
-	cookieGetValue      = 4
-	cookieGetDomain     = 6
-	cookieGetPath       = 7
-	cookieGetExpires    = 8
-	cookiePutExpires    = 9
-	cookieGetHTTPOnly   = 10
-	cookiePutHTTPOnly   = 11
-	cookieGetSameSite   = 12
-	cookiePutSameSite   = 13
-	cookieGetSecure     = 14
-	cookiePutSecure     = 15
-	cookieGetSession    = 16
+	wv2GetCookieManager                  = 66
+	cookieManagerCreate                  = 3
+	cookieManagerGet                     = 5
+	cookieManagerAdd                     = 6
+	cookieManagerDeleteWithDomainAndPath = 9
+	cookieListCount                      = 3
+	cookieListValue                      = 4
+	cookieGetName                        = 3
+	cookieGetValue                       = 4
+	cookieGetDomain                      = 6
+	cookieGetPath                        = 7
+	cookieGetExpires                     = 8
+	cookiePutExpires                     = 9
+	cookieGetHTTPOnly                    = 10
+	cookiePutHTTPOnly                    = 11
+	cookieGetSameSite                    = 12
+	cookiePutSameSite                    = 13
+	cookieGetSecure                      = 14
+	cookiePutSecure                      = 15
+	cookieGetSession                     = 16
 )
 
 var iidICoreWebView2_2 = guid("9e8f0cf8-e670-4b5e-b2bc-73e061e3184c")
@@ -230,7 +231,7 @@ func (a appController) SetCookie(c platform.Cookie, done func(error)) {
 		if !c.Expires.IsZero() {
 			seconds = float64(c.Expires.Unix())
 		}
-		if hr := putCookieExpires(nativeCookie, seconds); failed(hr) {
+		if hr := comCallFloat(nativeCookie, cookiePutExpires, seconds); failed(hr) {
 			r.finish(nil, hresultError("cookies: put_Expires", hr))
 			return
 		}
@@ -265,44 +266,42 @@ func (a appController) SetCookie(c platform.Cookie, done func(error)) {
 }
 
 func (a appController) DeleteCookie(key platform.CookieKey, done func(error)) {
-	// Enumerating actual objects also supports nameless native cookies and
-	// rejects indistinguishable partitioned entries. No wildcard APIs are used.
 	a.withCookieManager(func(_ []platform.Cookie, err error) { done(err) }, func(r *cookieRequest) {
-		r.enumerate(func(list uintptr) error {
-			var match uintptr
-			defer func() { release(match) }()
-			err := cookieEach(list, func(c uintptr) error {
-				name, err := cookieString(c, cookieGetName)
+		hr := comCall(r.manager, cookieManagerDeleteWithDomainAndPath, uintptr(unsafe.Pointer(u16(key.Name))), uintptr(unsafe.Pointer(u16(key.Domain))), uintptr(unsafe.Pointer(u16(key.Path))))
+		if failed(hr) {
+			r.finish(nil, hresultError("cookies: DeleteCookiesWithDomainAndPath", hr))
+			return
+		}
+		r.whenDeleted(key, time.Now().Add(2*time.Second))
+	})
+}
+
+// whenDeleted finishes once the cookie of key is gone. WebView2 deletes
+// cookies after DeleteCookiesWithDomainAndPath returns, and GetCookies may
+// still find one for some milliseconds.
+func (r *cookieRequest) whenDeleted(key platform.CookieKey, deadline time.Time) {
+	r.enumerate(func(list uintptr) error {
+		found := false
+		err := cookieEach(list, func(c uintptr) error {
+			var fields [3]string
+			for i, slot := range []int{cookieGetName, cookieGetDomain, cookieGetPath} {
+				v, err := cookieString(c, slot)
 				if err != nil {
 					return err
 				}
-				domain, err := cookieString(c, cookieGetDomain)
-				if err != nil {
-					return err
-				}
-				path, err := cookieString(c, cookieGetPath)
-				if err != nil {
-					return err
-				}
-				if name == key.Name && strings.ToLower(domain) == key.Domain && path == key.Path {
-					if match != 0 {
-						return fmt.Errorf("mygo: cookies: ambiguous cookie key")
-					}
-					addRef(c)
-					match = c
-				}
-				return nil
-			})
-			if err != nil {
-				return err
+				fields[i] = v
 			}
-			if match != 0 {
-				if hr := comCall(r.manager, cookieManagerDelete, match); failed(hr) {
-					return hresultError("cookies: DeleteCookie", hr)
-				}
-			}
-			r.finish(nil, nil)
+			found = found || fields[0] == key.Name && strings.ToLower(fields[1]) == key.Domain && fields[2] == key.Path
 			return nil
 		})
+		if err != nil {
+			return err
+		}
+		if found && time.Now().Before(deadline) {
+			r.whenDeleted(key, deadline)
+			return nil
+		}
+		r.finish(nil, nil)
+		return nil
 	})
 }

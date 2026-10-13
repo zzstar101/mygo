@@ -81,8 +81,44 @@ func TestCookies(t *testing.T) {
 	if err := mygo.Cookies.Delete(prefix+"plain", "127.0.0.1", ""); err != nil {
 		t.Fatal(err)
 	}
+	if _, found, err := mygo.Cookies.Get(prefix+"plain", "127.0.0.1", ""); err != nil || found {
+		t.Fatalf("deleted cookie still there: %v %v", found, err)
+	}
 	if _, found, err := mygo.Cookies.Get(prefix+"deep", "127.0.0.1", "/deep/path"); err != nil || !found {
 		t.Fatalf("deep sibling lost: %v %v", found, err)
+	}
+	// A domain cookie of a site no page has opened, with every attribute.
+	want := mygo.Cookie{Name: prefix + "domain", Value: "v1", Domain: ".mygo-cookies.test", Path: "/",
+		Expires: time.Now().Add(time.Hour).UTC().Truncate(time.Second), Secure: true, HTTPOnly: true, SameSite: mygo.CookieSameSiteNone}
+	for _, site := range []mygo.CookieSameSite{mygo.CookieSameSiteNone, mygo.CookieSameSiteStrict, mygo.CookieSameSiteLax} {
+		want.SameSite = site
+		if err := mygo.Cookies.Set(want); err != nil {
+			t.Fatalf("Set %s: %v", site, err)
+		}
+		got, found, err := mygo.Cookies.Get(want.Name, want.Domain, want.Path)
+		if err != nil || !found || got != want {
+			t.Fatalf("domain cookie, SameSite %s: %+v %v %v, want %+v", site, got, found, err, want)
+		}
+	}
+	// The host's cookie of the same name is another cookie.
+	host := mygo.Cookie{Name: want.Name, Value: "v2", Domain: "mygo-cookies.test"}
+	if err := mygo.Cookies.Set(host); err != nil {
+		t.Fatal(err)
+	}
+	if err := mygo.Cookies.Delete(host.Name, host.Domain, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := mygo.Cookies.Get(host.Name, host.Domain, ""); err != nil || found {
+		t.Fatalf("deleted host cookie still there: %v %v", found, err)
+	}
+	if got, found, err := mygo.Cookies.Get(want.Name, want.Domain, want.Path); err != nil || !found || got.Value != want.Value {
+		t.Fatalf("deleting the host's cookie changed the domain's: %+v %v %v", got, found, err)
+	}
+	if err := mygo.Cookies.Delete(want.Name, want.Domain, want.Path); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := mygo.Cookies.Get(want.Name, want.Domain, want.Path); err != nil || found {
+		t.Fatalf("deleted domain cookie still there: %v %v", found, err)
 	}
 	if _, err := sibling.Page().Eval("localStorage.setItem('cookies-test','keep')"); err != nil {
 		t.Fatal(err)

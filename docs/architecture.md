@@ -57,7 +57,7 @@ framework safely. Read it before changing anything under `internal/`.
 ├── protocol.go         custom schemes served by http.Handler, FileServer
 ├── frontend.go         the app's frontend: relative URLs, devUrl, mygo://localhost
 ├── menu.go             Menu/MenuItem model, roles, native item updates
-├── cookies.go              Go-only shared webview cookie store; validation, exact keys, shutdown
+├── cookies.go          Cookies: the pages' cookies, checked and keyed by name, domain and path
 ├── dialog.go modules.go clipboard.go: shell, clipboard, screen, theme, tray, shortcuts, notifications
 ├── loop.go             main-thread queue: postMain / onMain / await
 ├── events.go           listener lists and the Preventable event types
@@ -429,11 +429,13 @@ purego gives three primitives, used everywhere:
 - **ABI.** On x64, structs over 8 bytes are passed by reference and Go
   mirrors the first integer arguments into the XMM registers, so doubles can
   be passed as bits. On ARM64, 16-byte structs travel in two registers and
-  floats cannot be passed, so zoom falls back to CSS (`abi_*.go`). Go
-  callbacks read only integer registers: the two methods of UI Automation
-  that take doubles enter through thunks in assembly (`uia_*.s`), which
-  move the doubles' bits to the integer registers of their positions,
-  touching only registers a call may change, and jump to the callbacks.
+  `syscall` cannot pass floats, so zoom falls back to CSS (`abi_*.go`);
+  `comCallFloat` calls methods taking a double through purego instead,
+  as `put_Expires` of cookies. Go callbacks read only integer registers:
+  the two methods of UI Automation that take doubles enter through thunks
+  in assembly (`uia_*.s`), which move the doubles' bits to the integer
+  registers of their positions, touching only registers a call may
+  change, and jump to the callbacks.
 - DPI: the process is per-monitor aware (v2); the backend converts between
   pixels and DIPs with the window's or monitor's DPI. Frameless windows, and
   those with a hidden title bar, drop the caption in `WM_NCCALCSIZE` but
@@ -3163,7 +3165,7 @@ which npm allows only for packages that exist: the first release uses an
 | window icon | ignored | `gtk_window_set_icon` | `WM_SETICON` at the window's DPI |
 | URL schemes | Info.plist (`urlSchemes`); `RegisterURLScheme` makes the app the default handler | desktop entry + `mimeapps.list` | `HKCU\Software\Classes` |
 | downloads | `shouldPerformDownload`, non-displayable or attachment responses → `WKDownload` delegate | `download-started` / `decide-destination` on the web context; response policy for attachments | `DownloadStarting` (`ICoreWebView2_4`), replacing WebView2's download UI |
-| Cookies | default `WKHTTPCookieStore` (10.15+ full fields) | default `WebKitCookieManager` (List 2.42+, Soup 2.70+/3 for SameSite; existing nonpersistent default), coupled WebKit/JSC/Soup ABI family | shared WebView2 `_2` cookie manager; needs a page window; expiration ABI thunk on arm64 |
+| Cookies | the default `WKWebsiteDataStore`'s `WKHTTPCookieStore` | the default web context's `WebKitCookieManager` (2.42+, kept in memory); libsoup 3 or 2.4 to match WebKitGTK 4.1 or 4.0 | `ICoreWebView2CookieManager` (`ICoreWebView2_2`) of a window's web view; `put_Expires` called with `comCallFloat` |
 | ClearBrowsingData | default `WKWebsiteDataStore`, all types | the web context's website data manager | the WebView2 profile's `ClearBrowsingDataAll` (needs a window) |
 | permissions | `WKUIDelegate` media capture (camera, microphone) | `permission-request` (camera, microphone, geolocation, notifications) | `PermissionRequested` (the same four; WebView2 asks about others) |
 | file associations | `CFBundleDocumentTypes`; files arrive with `application:openURLs:` | desktop entry `MimeType` (`%U`), a shared-mime-info package in the .deb for types the app defines | ProgIDs and `OpenWithProgids` written by the installer |

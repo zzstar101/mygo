@@ -54,14 +54,8 @@ type Backend struct {
 	DockMenu *platform.Menu
 	// Cleared counts ClearBrowsingData calls.
 	Cleared int
+	// cookies holds the cookies of the pages, by name, domain and path.
 	cookies map[platform.CookieKey]platform.Cookie
-	// Cookie test controls are accessed on main, like native state.
-	CookieListError, CookieSetError, CookieDeleteError error
-	CookieNow                                          func() time.Time
-	CookieSnapshot                                     []platform.Cookie
-	CookieCalls                                        []string
-	CookieDeferred                                     bool
-	CookiePending                                      []func()
 	// Dialog results returned by the next dialog.
 	OpenResult    []string
 	SaveResult    string

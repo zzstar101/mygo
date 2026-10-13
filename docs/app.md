@@ -257,55 +257,44 @@ until they reload.
 
 ### Cookies
 
-`mygo.Cookies` manages the existing default webview store shared by the app's
-pages, not a Go HTTP client jar or the system browser. It is Go-only: HTTPOnly
-and cross-origin cookies may contain credentials, so never bind this module
-wholesale to a page. Native UI windows do not provide a cookie store.
+`mygo.Cookies` reads and changes the cookies the app's pages share,
+`HttpOnly` ones included, for example to sign the pages in with a token
+the backend got, or to read the session a page's sign-in set:
 
 ```go
 err := mygo.Cookies.Set(mygo.Cookie{
-    Name: "session", Value: "encoded-token", Domain: "example.com",
-    Secure: true, HTTPOnly: true, SameSite: mygo.CookieSameSiteLax,
+	Name:     "session",
+	Value:    token,
+	Domain:   "example.com",
+	Secure:   true,
+	HTTPOnly: true,
+	Expires:  time.Now().Add(30 * 24 * time.Hour),
 })
-if err != nil { return err }
-cookies, err := mygo.Cookies.List() // includes HTTPOnly; sorted domain/path/name
-_ = cookies
-if err != nil { return err }
-return mygo.Cookies.Delete("session", "example.com", "/")
+
+c, ok, err := mygo.Cookies.Get("session", "example.com", "/")
+
+cookies, err := mygo.Cookies.List() // sorted by domain, path and name
+
+err = mygo.Cookies.Delete("session", "example.com", "/")
+err = mygo.Cookies.Clear() // every cookie, but not the pages' storage
 ```
 
-`Get(name, domain, path)` returns `(cookie, found, error)`. Get and Delete match
-exact keys, not request URLs: a leading-dot domain is distinct, domain case is
-normalized, and an empty path means `/`. Prefer keys returned by List. Duplicate
-indistinguishable native entries are ambiguous; partition metadata is not
-represented, so this is not a complete browser backup/restore API.
+A cookie's name, domain and path identify it. A domain without a leading
+dot is a host's, sent to that host only; with one, `.example.com`, the
+cookie goes to its subdomains too. Domains are ASCII (punycode for
+others) and an empty path is `/`. `Set` replaces the cookie of the same
+name, domain and path; an empty `SameSite` is `Lax`, and `None` needs
+`Secure`. The value takes the characters a `Set-Cookie` header allows:
+encode others, for example in base64. A zero `Expires` makes a cookie
+that lasts until the app quits, and one in the past deletes the cookie.
 
-Set accepts ASCII HTTP-token names and cookie-octet values; encode arbitrary
-payloads. Use ASCII/punycode domains without ports or trailing dots. Empty
-SameSite becomes Lax; None requires Secure. `__Secure-` and `__Host-` restrictions
-are checked. Zero Expires means a session cookie; other dates use UTC whole
-seconds and a past date deletes the exact key. Expires is metadata, not a promise
-of persistence or a disk flush: the engine can reject, clamp, or evict cookies.
+The methods are safe from any goroutine once the app is running, and on
+the main thread the app keeps handling events while they wait. Cookies
+may carry the user's credentials: rather than binding the module to the
+pages, bind a backend method that does what the page needs.
 
-`Cookies.Clear()` deletes a snapshot of cookies only and preserves localStorage,
-IndexedDB and caches. It attempts every deletion and joins errors; partial
-success is possible. Pages can create cookies concurrently, so neither Clear nor
-broad `App.ClearBrowsingData()` is an authentication transaction.
-
-Methods are safe from any goroutine once the app is running, including listeners
-on main (which pump the event loop reentrantly while waiting). Main-thread calls
-before Run panic. Shutdown wakes pending callers with an error; accepted native
-mutations cannot be rolled back. Concurrent calls have no promised ordering.
-
-- macOS requires 10.15+ for full cookie fields, detected at runtime.
-- Linux uses the unchanged default WebKit context, which does **not** configure
-  persistent cookie storage. List/Get/Clear need WebKitGTK 2.42+; mutations need
-  2.20+, and Set needs Soup 2.70+ or 3 for SameSite. Missing optional APIs report
-  capability errors without preventing ordinary app startup. An older Soup may
-  report unknown SameSite on reads.
-- Windows needs an open web-page window; initialization is awaited. The runtime
-  must support `ICoreWebView2_2` (introduced with SDK 1.0.705.50). No hidden window
-  is created. The store remains shared if the selected window changes.
-
-Store identity and persistence follow the existing backend configuration; this
-API does not add profiles, partitions, or new isolation guarantees.
+Windows keeps the cookies in the web views, so the methods need a window
+that shows a web page, and fail without one. On Linux they need
+WebKitGTK 2.42 or newer, and `Set` libsoup 2.70 or newer. WebKitGTK's
+default context keeps cookies in memory, so they last until the app
+quits.

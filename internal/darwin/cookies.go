@@ -12,15 +12,6 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 )
 
-// Prewarm purego's signature-keyed block trampolines during startup. Request
-// blocks own closures, but do not allocate another native callback trampoline.
-func warmCookieBlocks() {
-	b := newBlock(func(objc.Block, id) {})
-	b.Release()
-	b = newBlock(func(objc.Block) {})
-	b.Release()
-}
-
 func cookieStore() (id, error) {
 	store := send(class("WKWebsiteDataStore"), "defaultDataStore")
 	if !sendBool(store, "respondsToSelector:", uintptr(sel("httpCookieStore"))) || !sendBool(class("NSHTTPCookie"), "instancesRespondToSelector:", uintptr(sel("sameSitePolicy"))) {
