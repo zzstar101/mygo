@@ -227,3 +227,79 @@ func TestDiffViewerLineSelection(t *testing.T) {
 		t.Fatalf("extended %+v", r)
 	}
 }
+
+// The app runs commands and reads the caret in the side that has the
+// keyboard, or had it last: the new side's until the old one has it.
+func TestDiffViewerActiveSide(t *testing.T) {
+	var oldText, newText strings.Builder
+	for i := range 40 {
+		line := "line " + strconv.Itoa(i)
+		oldText.WriteString(line + "\n")
+		switch i {
+		case 5, 30:
+			newText.WriteString("changed " + strconv.Itoa(i) + "\n")
+		default:
+			newText.WriteString(line + "\n")
+		}
+	}
+	d := &DiffState{Old: NewBuffer(oldText.String()), New: NewBuffer(newText.String()), ExpandUnchanged: true}
+	// Before the viewer is built, the new side's caret is at the start.
+	if side, p := d.Cursor(); side != DiffNew || p != (Pos{}) || d.CurrentHunk() != -1 {
+		t.Fatalf("before building: %v %+v, hunk %d", side, p, d.CurrentHunk())
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		DiffView(c, d).Fill()
+	}, 900, 500)
+	tt.Frame()
+	d.GoToHunk(1)
+	tt.Frame()
+	if side, p := d.Cursor(); side != DiffNew || p.Line != 30 || d.CurrentHunk() != 1 {
+		t.Fatalf("after GoToHunk(1): %v %+v, hunk %d", side, p, d.CurrentHunk())
+	}
+	// Between changes, the current one is the one before the caret: the
+	// view shows the second change in its middle, lines of the first
+	// above it.
+	lh := float32(d.eds[1].view.lineHeight)
+	tt.ClickAt(200, 2.5*lh)
+	tt.Frame()
+	if side, p := d.Cursor(); side != DiffOld || p.Line <= 5 || p.Line >= 30 || d.CurrentHunk() != 0 {
+		t.Fatalf("clicked in the old side: %v %+v, hunk %d", side, p, d.CurrentHunk())
+	}
+	// The old side stays active as the window loses the keyboard.
+	tt.SetFocused(false)
+	tt.Frame()
+	if side, _ := d.Cursor(); side != DiffOld {
+		t.Fatalf("unfocused: side %v", side)
+	}
+	// GoToHunk moves the caret Cursor reads, so an app's Next Change
+	// steps from it.
+	d.GoToHunk(d.CurrentHunk() + 1)
+	tt.Frame()
+	if side, p := d.Cursor(); side != DiffOld || p.Line != 30 || d.CurrentHunk() != 1 {
+		t.Fatalf("after GoToHunk in the old side: %v %+v, hunk %d", side, p, d.CurrentHunk())
+	}
+	tt.SetFocused(true)
+	tt.Frame()
+	if !d.Run(Find) {
+		t.Fatal("Run(Find) did nothing")
+	}
+	tt.Frame()
+	if !d.eds[0].find.open || d.eds[1].find.open {
+		t.Fatalf("find bars open: old %v, new %v", d.eds[0].find.open, d.eds[1].find.open)
+	}
+	// Back in the new side, between the changes, Find selects the match
+	// after the caret.
+	tt.ClickAt(650, 2.5*lh)
+	tt.Frame()
+	d.Find("changed")
+	tt.Frame()
+	if side, p := d.Cursor(); side != DiffNew || p.Line != 30 || !d.eds[1].find.open {
+		t.Fatalf("Find in the new side: %v %+v, open %v", side, p, d.eds[1].find.open)
+	}
+	// A unified view has only the new side's editor.
+	d.Layout = DiffUnified
+	tt.Frame()
+	if side, _ := d.Cursor(); side != DiffNew {
+		t.Fatalf("unified: side %v", side)
+	}
+}

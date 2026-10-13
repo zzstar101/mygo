@@ -116,6 +116,11 @@ type (
 var pangoLib struct {
 	gObjectRef   func(obj uintptr) uintptr
 	gObjectUnref func(obj uintptr)
+	gFree        func(p uintptr)
+
+	fontMapListFamilies   func(fontMap uintptr, families **uintptr, n *int32)
+	fontFamilyGetName     func(family uintptr) *byte
+	fontFamilyIsMonospace func(family uintptr) bool
 
 	fontMapNew                func() uintptr
 	fontMapCreateContext      func(fontMap uintptr) uintptr
@@ -214,6 +219,10 @@ func loadPango() error {
 	if err != nil {
 		return err
 	}
+	glib, err := open("libglib-2.0.so.0")
+	if err != nil {
+		return err
+	}
 	pangocairo, err := open("libpangocairo-1.0.so.0")
 	if err != nil {
 		return err
@@ -234,6 +243,10 @@ func loadPango() error {
 	l := &pangoLib
 	bind(gobject, &l.gObjectRef, "g_object_ref")
 	bind(gobject, &l.gObjectUnref, "g_object_unref")
+	bind(glib, &l.gFree, "g_free")
+	bind(pango, &l.fontMapListFamilies, "pango_font_map_list_families")
+	bind(pango, &l.fontFamilyGetName, "pango_font_family_get_name")
+	bind(pango, &l.fontFamilyIsMonospace, "pango_font_family_is_monospace")
 	bind(pangocairo, &l.fontMapNew, "pango_cairo_font_map_new")
 	bind(pangocairo, &l.contextSetFontOptions, "pango_cairo_context_set_font_options")
 	bind(pangocairo, &l.fontGetScaledFont, "pango_cairo_font_get_scaled_font")
@@ -333,6 +346,10 @@ type pangoEngine struct {
 	scaled map[scaledKey]uintptr
 
 	registered map[string]bool // files of registered fonts
+	// names are the names the app registered fonts under, as it gave them,
+	// and their own; appFamily the family of each, by lowercased name.
+	names     []string
+	appFamily map[string]string
 	// uiFamily is the desktop's interface font, which system-ui stands for
 	// before fontconfig's default.
 	uiFamily string
@@ -398,6 +415,7 @@ func newPango() (*pangoEngine, error) {
 		fonts:      map[uintptr]*Font{},
 		scaled:     map[scaledKey]uintptr{},
 		registered: map[string]bool{},
+		appFamily:  map[string]string{},
 	}
 	// A font map of our own: the default one belongs to the thread that
 	// asks for it, and goroutines move between threads.
@@ -895,6 +913,39 @@ func (e *pangoEngine) draw(f *Font, id uint32, scale, dx float32, subpixel bool)
 	return b
 }
 
+// families lists the app's families and the font map's, the monospaced
+// ones when mono, as fontconfig knows them, without the generic families
+// Pango adds (Sans, Serif, Monospace, System-ui), which are aliases rather
+// than fonts. The font map's hold the app's under their own names.
+func (e *pangoEngine) families(mono bool) (app, system []string) {
+	l := &pangoLib
+	var arr *uintptr
+	var n int32
+	l.fontMapListFamilies(e.fontMap, &arr, &n)
+	if arr != nil {
+		defer l.gFree(uintptr(unsafe.Pointer(arr)))
+	}
+	fixed := map[string]bool{} // whether each family is monospaced, by lowercased name
+	for _, fam := range unsafe.Slice(arr, int(n)) {
+		name := cString(l.fontFamilyGetName(fam))
+		switch strings.ToLower(name) {
+		case "", "sans", "serif", "monospace", "system-ui":
+			continue
+		}
+		isMono := l.fontFamilyIsMonospace(fam)
+		fixed[strings.ToLower(name)] = isMono
+		if !mono || isMono {
+			system = append(system, name)
+		}
+	}
+	for _, name := range e.names {
+		if !mono || fixed[strings.ToLower(e.appFamily[strings.ToLower(name)])] {
+			app = append(app, name)
+		}
+	}
+	return app, system
+}
+
 // register adds a font file to fontconfig's fonts for the app, from the
 // user's cache directory, and an alias for family.
 func (e *pangoEngine) register(data []byte, family string) error {
@@ -928,8 +979,8 @@ func (e *pangoEngine) register(data []byte, family string) error {
 		}
 		e.registered[path] = true
 	}
+	names := fontFamilies(config, path)
 	if family != "" {
-		names := fontFamilies(config, path)
 		if len(names) == 0 {
 			return errors.New("mygo: cannot add font: no family name")
 		}
@@ -940,6 +991,12 @@ func (e *pangoEngine) register(data []byte, family string) error {
 				return errors.New("mygo: cannot add font under another family name")
 			}
 		}
+		e.appFamily[strings.ToLower(family)] = names[0]
+		e.names = append(e.names, family)
+	}
+	for _, name := range names {
+		e.appFamily[strings.ToLower(name)] = name
+		e.names = append(e.names, name)
 	}
 	l.fontMapConfigChanged(e.fontMap)
 	// Fonts and descriptions found before may resolve differently now.

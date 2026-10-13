@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"image/png"
 	"os"
@@ -489,6 +491,124 @@ func TestMenus(t *testing.T) {
 	}
 }
 
+func TestCopyOnSelect(t *testing.T) {
+	loadLib(t)
+	for _, on := range []bool{false, true} {
+		conn := newPipe()
+		term, err := New(Options{Conn: conn, CopyOnSelect: on})
+		if err != nil {
+			t.Fatal(err)
+		}
+		term.Feed([]byte("hello world"))
+		tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+		x0, y0 := cellCenter(term, 0, 0)
+		x1, y1 := cellCenter(term, 4, 0)
+		tt.Press(x0-2, y0)
+		tt.Move(x1+2, y1)
+		tt.Release(x1+2, y1)
+		want := ""
+		if on {
+			want = "hello"
+		}
+		if got := tt.Clipboard(); got != want {
+			t.Errorf("CopyOnSelect %v: selecting copied %q, want %q", on, got, want)
+		}
+		term.Close()
+	}
+}
+
+func TestCopyAndPasteKeys(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("Control and Insert keep their meaning on macOS")
+	}
+	loadLib(t)
+	conn := newPipe()
+	term, err := New(Options{Conn: conn, CtrlCCopies: true, CtrlVPastes: true, InsertKeys: true, RightClickPastes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.Feed([]byte("some text"))
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	// Control-C copies a selection and lets go of it; without one it
+	// interrupts.
+	tt.Command("selectAll")
+	tt.Key(ui.Ctrl, ui.KeyC)
+	if got := tt.Clipboard(); got != "some text" {
+		t.Errorf("Control-C copied %q", got)
+	}
+	if got := conn.take(1); got != "" {
+		t.Errorf("Control-C with a selection sent %q", got)
+	}
+	tt.Key(ui.Ctrl, ui.KeyC)
+	if got := conn.take(1); got != "\x03" {
+		t.Errorf("Control-C without a selection sent %q", got)
+	}
+	tt.SetClipboard("by V")
+	tt.Key(ui.Ctrl, ui.KeyV)
+	if got := conn.take(4); got != "by V" {
+		t.Errorf("Control-V sent %q", got)
+	}
+	tt.SetClipboard("")
+	tt.Command("selectAll")
+	tt.Key(ui.Ctrl, ui.KeyInsert)
+	if got := tt.Clipboard(); got != "some text" {
+		t.Errorf("Control-Insert copied %q", got)
+	}
+	tt.SetClipboard("by Insert")
+	tt.Key(ui.Shift, ui.KeyInsert)
+	if got := conn.take(9); got != "by Insert" {
+		t.Errorf("Shift-Insert sent %q", got)
+	}
+	// A secondary click copies a selection, else pastes, and shows no menu.
+	x, y := cellCenter(term, 1, 0)
+	tt.SetClipboard("")
+	tt.Command("selectAll")
+	tt.RightClickAt(x, y)
+	if got := tt.Clipboard(); got != "some text" {
+		t.Errorf("a secondary click over a selection copied %q", got)
+	}
+	tt.RightClickAt(x, y)
+	if got := conn.take(9); got != "some text" {
+		t.Errorf("a secondary click without a selection sent %q", got)
+	}
+	if menu := tt.Menu(); menu != nil {
+		t.Errorf("a secondary click showed the menu %q", menu)
+	}
+}
+
+// TestCopyAndPasteKeysOff: without the options, Control-C and -V reach
+// the program and a secondary click shows the menu.
+func TestCopyAndPasteKeysOff(t *testing.T) {
+	loadLib(t)
+	conn := newPipe()
+	term, err := New(Options{Conn: conn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.Feed([]byte("some text"))
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	tt.Command("selectAll")
+	tt.SetClipboard("clipboard")
+	tt.Key(ui.Ctrl, ui.KeyC)
+	if got := conn.take(1); got != "\x03" {
+		t.Errorf("Control-C sent %q", got)
+	}
+	tt.Key(ui.Ctrl, ui.KeyV)
+	if got := conn.take(1); got != "\x16" {
+		t.Errorf("Control-V sent %q", got)
+	}
+	if got := tt.Clipboard(); got != "clipboard" {
+		t.Errorf("the clipboard became %q", got)
+	}
+	x, y := cellCenter(term, 1, 0)
+	tt.RightClickAt(x, y)
+	if tt.Menu() == nil {
+		t.Error("a secondary click showed no menu")
+	}
+}
+
 func TestAppearance(t *testing.T) {
 	loadLib(t)
 	term, err := New(Options{Conn: newPipe()})
@@ -920,5 +1040,162 @@ func TestOnScrollTakesTheWheel(t *testing.T) {
 	tt.Scroll(100, 100, 0, -40)
 	if !slices.Equal(seen, []int{-3, 3, -3}) {
 		t.Errorf("OnScroll saw %v without alternate scroll", seen)
+	}
+}
+
+// A program that reads the clipboard itself (mode 5522) is told what a
+// paste offers and reads the image with the event's password; a
+// terminal that did not paste, as another window of the program, answers
+// nothing; without the mode the text is pasted, bracketed.
+func TestPasteImage(t *testing.T) {
+	loadLib(t)
+	image := bytes.Repeat([]byte("\x89PNG\r\n\x1a\nxyz"), 1000)
+	conn := newPipe()
+	var mu sync.Mutex
+	var statuses []string
+	var term *Terminal
+	var err error
+	term, err = New(Options{Conn: conn, OnPasteStatus: func(s PasteStatus, sent, total int) {
+		term.Title() // the terminal is not locked
+		mu.Lock()
+		statuses = append(statuses, fmt.Sprint(s, sent == total && total > 0))
+		mu.Unlock()
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	tt.SetClipboard("some text")
+	tt.SetClipboardImage(image)
+	pasteMods := ui.Ctrl | ui.Shift
+	if runtime.GOOS == "darwin" {
+		pasteMods = ui.Super
+	}
+
+	term.Feed([]byte("\x1b[?5522h"))
+	tt.Key(pasteMods, ui.KeyV)
+	event := conn.take(1)
+	_, after, ok := strings.Cut(event, ":pw=")
+	if !ok || !strings.HasSuffix(event, "\x1b\\") {
+		t.Fatalf("paste sent %q, want a paste event", event)
+	}
+	pw := after[:strings.Index(after, "\x1b")]
+	listing, _ := base64.StdEncoding.DecodeString(event[strings.Index(event, "Lg==:pw="+pw+";")+len("Lg==:pw="+pw+";") : strings.Index(event, "\x1b\\\x1b]5522;type=read:status=DONE")])
+	if string(listing) != "image/png text/plain\n" {
+		t.Errorf("offered %q", listing)
+	}
+
+	name := base64.StdEncoding.EncodeToString([]byte("Paste event"))
+	mime := base64.StdEncoding.EncodeToString([]byte("image/png"))
+	read := "\x1b]5522;type=read:pw=" + pw + ":name=" + name + ";" + mime + "\x1b\\"
+	term.Feed([]byte(read))
+	reply := conn.take(len(image) * 4 / 3)
+	var got []byte
+	for _, pkt := range strings.Split(reply, "\x1b\\") {
+		if _, data, ok := strings.Cut(pkt, "status=DATA:mime="+mime+";"); ok {
+			b, err := base64.StdEncoding.DecodeString(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, b...)
+		}
+	}
+	if !bytes.Equal(got, image) || !strings.HasSuffix(reply, "status=DONE\x1b\\") {
+		t.Errorf("the program read %d bytes of %d; reply ends %q", len(got), len(image), reply[max(0, len(reply)-40):])
+	}
+
+	// Another terminal of the same program (a mirror) sees the read too,
+	// and must not answer it.
+	conn2 := newPipe()
+	other, err := New(Options{Conn: conn2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	other.Feed([]byte("\x1b[?5522h" + read))
+	if sent := conn2.take(1); sent != "" {
+		t.Errorf("a terminal that did not paste answered %q", sent)
+	}
+
+	// Without the mode, the text, bracketed when asked.
+	term.Feed([]byte("\x1b[?5522l\x1b[?2004h"))
+	tt.Key(pasteMods, ui.KeyV)
+	if sent := conn.take(1); sent != "\x1b[200~some text\x1b[201~" {
+		t.Errorf("without the mode, pasted %q", sent)
+	}
+	// Only an image, and no program to read it: nothing, and told so.
+	tt.SetClipboard("")
+	tt.Key(pasteMods, ui.KeyV)
+	if sent := conn.take(1); sent != "" {
+		t.Errorf("with only an image and no mode, pasted %q", sent)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	seen := strings.Join(statuses, " ")
+	mu.Unlock()
+	// Offered, sending from nothing, then pieces, the last of them all sent;
+	// then the unsupported paste.
+	if !strings.HasPrefix(seen, fmt.Sprint(PasteOffered, false)+" "+fmt.Sprint(PasteSending, false)) ||
+		!strings.Contains(seen, fmt.Sprint(PasteSent, true)) || !strings.HasSuffix(seen, fmt.Sprint(PasteUnsupported, false)) {
+		t.Errorf("statuses %q", seen)
+	}
+}
+
+// TestOnZoom: Options.OnZoom takes the wheel with Control (Command on
+// macOS) in notches, rolling up positive, before OnScroll and a program
+// that takes the mouse.
+func TestOnZoom(t *testing.T) {
+	loadLib(t)
+	conn := newPipe()
+	var zooms, scrolls []int
+	term, err := New(Options{
+		Conn:     conn,
+		OnZoom:   func(steps int) { zooms = append(zooms, steps) },
+		OnScroll: func(rows int) bool { scrolls = append(scrolls, rows); return true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	tt.Frame()
+	zoomMod := ui.Cmd
+	wheel := func(mods ui.Modifiers, dy float32, precise bool) {
+		term.v.scroll(ui.InputEvent{Kind: ui.InputScroll, DY: dy, Mods: mods, Precise: precise})
+	}
+	wheel(zoomMod, -40, false) // a notch up
+	wheel(zoomMod, 40, false)  // and down
+	wheel(zoomMod, -120, false)
+	if !slices.Equal(zooms, []int{1, -1, 1}) {
+		t.Errorf("notches zoomed %v, want [1 -1 1]: one step an event", zooms)
+	}
+	// A trackpad's moves add up to notches of 40.
+	zooms = nil
+	for range 6 {
+		wheel(zoomMod, -15, true)
+	}
+	if !slices.Equal(zooms, []int{1, 1}) {
+		t.Errorf("a trackpad zoomed %v, want [1 1]", zooms)
+	}
+	if scrolls != nil {
+		t.Errorf("OnScroll saw %v while zooming", scrolls)
+	}
+	// Without the modifier the wheel scrolls.
+	zooms = nil
+	wheel(0, -40, false)
+	if zooms != nil || !slices.Equal(scrolls, []int{-3}) {
+		t.Errorf("a plain notch zoomed %v and scrolled %v", zooms, scrolls)
+	}
+	// A program that takes the mouse gets no report of a zoom.
+	term.Feed([]byte("\x1b[?1002h\x1b[?1006h"))
+	tt.Frame()
+	wheel(zoomMod, -40, false)
+	if !slices.Equal(zooms, []int{1}) {
+		t.Errorf("zoomed %v while the program took the mouse", zooms)
+	}
+	if got := conn.take(1); got != "" {
+		t.Errorf("a zoom sent %q to the program", got)
 	}
 }

@@ -27,6 +27,14 @@ func (s Services) ReadClipboard() string {
 	}
 	return ""
 }
+
+// ReadClipboardImage reads the clipboard's image as PNG, nil without one.
+func (s Services) ReadClipboardImage() []byte {
+	if rt := s.owner.Value(); rt != nil && !rt.closed {
+		return rt.host.readClipboardImage()
+	}
+	return nil
+}
 func (s Services) WriteClipboard(text string) {
 	if rt := s.owner.Value(); rt != nil && !rt.closed {
 		rt.host.writeClipboard(text)

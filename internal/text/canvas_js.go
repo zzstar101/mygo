@@ -51,6 +51,8 @@ type canvasEngine struct {
 	texts []string
 	// words caches the pen positions of the clusters of words.
 	words map[wordKey][]float32
+	// names are the families the app registered fonts under.
+	names []string
 	seg   segmenter.Segmenter
 	para  bidi.Paragraph
 	// image is the canvas's pixels read back, reused.
@@ -712,6 +714,22 @@ func (e *canvasEngine) decorate(r decoRange) []Stroke {
 	return out
 }
 
+// families lists the app's families alone: a browser does not tell what
+// fonts it has. A family is monospaced when an "i" is as wide as a "W" in
+// it, which tells only once its face has loaded.
+func (e *canvasEngine) families(mono bool) (app, system []string) {
+	for _, name := range e.names {
+		if mono {
+			e.setFont("100px " + strconv.Quote(name))
+			if e.ctx.Call("measureText", "i").Get("width").Float() != e.ctx.Call("measureText", "W").Get("width").Float() {
+				continue
+			}
+		}
+		app = append(app, name)
+	}
+	return app, nil
+}
+
 // register adds a font file to the document's fonts, as a FontFace of
 // family, or of its own family when family is "" (which the browser does
 // not tell: the face needs a family). Browsers load faces in the
@@ -726,6 +744,7 @@ func (e *canvasEngine) register(data []byte, family string) error {
 	fonts := js.Global().Get("document").Get("fonts")
 	fonts.Call("add", face)
 	face.Call("load").Call("catch", js.Global().Get("Function").New(""))
+	e.names = append(e.names, family)
 	clear(e.words)
 	return nil
 }

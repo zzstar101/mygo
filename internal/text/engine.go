@@ -57,6 +57,10 @@ type engine interface {
 	// register adds the fonts of a font file under family, or under their
 	// own family names when family is "".
 	register(data []byte, family string) error
+	// families lists the families text can use, in no order: the app's,
+	// under the names it registered fonts with and their own, and the
+	// system's; the monospaced ones only when mono.
+	families(mono bool) (app, system []string)
 	// resetScratch frees the room shape took from the engine's scratch,
 	// as a layout starts.
 	resetScratch()
