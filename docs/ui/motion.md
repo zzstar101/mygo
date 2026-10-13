@@ -300,11 +300,13 @@ card lands. `AnimateTo` moves one value of one element towards a target, and
 `Keyframes` plays one value along timed stops; a timeline coordinates many
 such values, each tween of its own, around one clock.
 
-Build it in the view, as everything else, and give each tween the value it
-shows this frame:
+An element keeps a timeline under a key, as it keeps `Keyframes`: build it
+in the view, as everything else, and give each tween the value it shows
+this frame:
 
 ```go
-tl := ui.NewTimeline(c, "intro", ui.TimelineOptions{Run: app.opened})
+card := ui.Column(c)
+tl := card.Timeline("intro", ui.TimelineOptions{Run: app.opened})
 x := tl.To(ui.Tween{From: -200, To: 0, Duration: 400 * time.Millisecond, Ease: ui.EaseOut})
 fade := tl.To(ui.Tween{From: 0, To: 1, Duration: 300 * time.Millisecond},
 	ui.OverlapPrevious(150*time.Millisecond))
@@ -320,15 +322,15 @@ tween at its `From` for a while after where it was placed.
 
 ### Labels and stagger
 
-`Label` marks a time of the timeline for tweens to start at, and `Stagger`
-spaces them out by index:
+`Label` marks a time of the timeline for tweens to start at, and an offset
+from it staggers them by index:
 
 ```go
-tl := ui.NewTimeline(c, "rows", ui.TimelineOptions{Run: app.shown})
+tl := list.Timeline("rows", ui.TimelineOptions{Run: app.shown})
 tl.Label("rows", ui.At(300*time.Millisecond))
 for i := range app.rows {
 	app.rows[i] = tl.To(ui.Tween{From: 0, To: 1, Duration: 200 * time.Millisecond},
-		ui.AtLabel("rows", ui.Stagger(i, 40*time.Millisecond)))
+		ui.AtLabel("rows", time.Duration(i)*40*time.Millisecond))
 }
 for i, shown := range app.rows {
 	rows[i].Opacity(shown).Translate(0, (1-shown)*12)
@@ -341,7 +343,9 @@ for i, shown := range app.rows {
 `Progress` how far along it is, from 0 to 1, for a scrubber. `Paused` holds
 the playhead where it is: time a paused timeline spends is not time it
 played, so letting a pause go plays on from where it held, however long the
-pause was. `Reverse` plays it backward to its start, and `Seek` and
+pause was. `Reverse` plays it backward from where the playhead is to its
+start, as a panel that closes the way it opened (`Reverse: !app.open`), and
+a timeline played over while reversed plays from its end. `Seek` and
 `Progress` hold it at a time or a part of the timeline for as long as they
 are given, going on from there when they are not. What the options say takes
 effect in the frame it is said in, so a button that pauses or plays the
@@ -352,28 +356,29 @@ o := ui.TimelineOptions{Run: app.run, Paused: app.paused, Reverse: app.reverse}
 if app.scrubbing {
 	o.Progress = &app.scrub
 }
-tl := ui.NewTimeline(c, "intro", o)
+tl := card.Timeline("intro", o)
 ```
 
 `Repeat` is how many more times the timeline plays after the first, as
 `KeyframeOptions.Repeat` is, `RepeatForever` for as long as the view builds
 it, with `Alternate` playing every other time backward; `Delay` holds the
 timeline at its first value for a while before it plays, and `RepeatDelay`
-the value it got to between plays. `Done` reports that it came to rest, and
-`Arrived` is true in the one frame in which it did, as `Settled` and
-`Arrived` are for a value.
+the value it got to between plays. `Done` reports that it came to rest, at
+its end or, in reverse, at its start, and `Arrived` is true in the one frame
+in which it did, as `Settled` and `Arrived` are for a value.
 
 Change `Run` to play the timeline again, or a changed one. Building it
 without changing `Run` keeps the playhead where it is, so a view may
 rearrange its tweens from frame to frame: the timeline plays the ones it
 arranged this frame. Arranging a longer one goes on from where the playhead
 is, and it is not `Done` until the timeline it arranged has played. A
-timeline the view stops building goes, and its state with it, as an
-element's does.
+timeline goes with its element's state when the view stops building the
+element.
 
-While the desktop asks for less motion, every tween shows its `To` at once
-and the timeline is over, as values, poses and `Keyframes` are, and it asks
-for no frame. It draws frames only while it plays, timed by `c.Now()`.
+While the desktop asks for less motion, the timeline is at once where it
+would come to rest, every tween at its `To`, or at its `From` when it plays
+back to its start, as values, poses and `Keyframes` are, and it asks for no
+frame. It draws frames only while it plays, timed by `c.Now()`.
 
 ## Scrolling
 

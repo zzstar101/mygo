@@ -9,16 +9,17 @@ import "time"
 // a tween returns the value it shows in this frame, and the view gives it
 // to a transform, a pose or a value, as it would give one of AnimateTo's.
 //
-//	tl := ui.NewTimeline(c, "intro", ui.TimelineOptions{Run: app.opened})
+//	card := ui.Column(c)
+//	tl := card.Timeline("intro", ui.TimelineOptions{Run: app.opened})
 //	x := tl.To(ui.Tween{From: -200, To: 0, Duration: 400 * time.Millisecond, Ease: ui.EaseOut})
 //	y := tl.To(ui.Tween{From: 20, To: 0, Duration: 300 * time.Millisecond},
 //		ui.OverlapPrevious(150*time.Millisecond))
 //	card.Translate(x, y)
 //
-// The timeline of a key is the same timeline from frame to frame while the
-// view builds it, and goes when the view stops, as an element's state does:
-// build it in the same order every frame, and change Run to play it again,
-// or a changed one.
+// An element keeps its timelines as it keeps its Keyframes, from frame to
+// frame while the view builds it, and they go with it: build a timeline in
+// the same order every frame, and change Run to play it again, or a
+// changed one.
 type Timeline struct {
 	c         *context
 	st        *timelineState
@@ -55,8 +56,11 @@ type TimelineOptions struct {
 	Delay, RepeatDelay time.Duration
 	// Paused holds the playhead where it is, so that the time a paused
 	// timeline spends is not time it played and it goes on from where it
-	// held when it is not paused; Reverse plays it backward, to its start.
-	Paused  bool
+	// held when it is not paused.
+	Paused bool
+	// Reverse plays the timeline backward from where the playhead is, to
+	// its start, as a menu that closes the way it opened; a timeline that
+	// Run plays over while Reverse is set plays from its end.
 	Reverse bool
 	// Seek holds the playhead at a time of the timeline, and Progress at
 	// a part of its duration, for a scrubber or a jump: while either is
@@ -66,33 +70,38 @@ type TimelineOptions struct {
 	Progress *float32
 }
 
-// NewTimeline returns the timeline this window keeps under key, playing it
+// Timeline returns the timeline the element keeps under key, playing it
 // as o says. Every tween added to it shares one playhead, and returns the
 // value it shows in this frame.
 //
-//	tl := ui.NewTimeline(c, "intro", ui.TimelineOptions{Run: app.opened})
+//	card := ui.Column(c)
+//	tl := card.Timeline("intro", ui.TimelineOptions{Run: app.opened})
 //	x := tl.To(ui.Tween{From: -200, To: 0, Duration: 400 * time.Millisecond, Ease: ui.EaseOut})
 //	card.Translate(x, 0)
 //
-// Key tells apart the timelines of one window, so it must be stable from
-// frame to frame and the same in no two timelines. Play the timeline again,
-// or a changed one, by changing o.Run.
-func coreNewTimeline(c *context, key any, o TimelineOptions) *Timeline {
-	rt := c.rt
-	if rt.timelines == nil {
-		rt.timelines = map[any]*timelineState{}
+// Key tells apart the timelines of the element, as it does its Keyframes.
+// Play the timeline again, or a changed one, by changing o.Run.
+func (e *node) Timeline(key any, o TimelineOptions) *Timeline {
+	if o.Repeat < RepeatForever || o.Delay < 0 || o.RepeatDelay < 0 {
+		panic("ui: a Timeline Repeat must be RepeatForever or nonnegative, and its delays nonnegative")
 	}
-	st := rt.timelines[key]
+	if !e.hasState() {
+		return nil
+	}
+	if e.st.timelines == nil {
+		e.st.timelines = map[any]*timelineState{}
+	}
+	st := e.st.timelines[key]
 	if st == nil {
 		st = &timelineState{}
-		rt.timelines[key] = st
+		e.st.timelines[key] = st
 	}
 	tl := st.handle
 	if tl == nil {
 		tl = &Timeline{}
 		st.handle = tl
 	}
-	tl.c, tl.st = c, st
+	tl.c, tl.st = e.c, st
 	tl.segs = st.segs[:0]
 	tl.prevStart, tl.prevEnd = 0, 0
 	tl.begin(o)
@@ -110,23 +119,21 @@ func (t *Timeline) To(tw Tween, at ...Placement) float32 {
 	if t == nil {
 		return tw.From
 	}
-	if tw.Duration < 0 {
-		panic("ui: animation durations must not be negative")
-	}
-	if tw.Delay < 0 {
+	if tw.Duration < 0 || tw.Delay < 0 {
 		panic("ui: animation durations must not be negative")
 	}
 	start := t.place(at) + tw.Delay
 	seg := tweenSeg{start: start, dur: tw.Duration, from: tw.From, to: tw.To, ease: tw.Ease}
 	t.segs = append(t.segs, seg)
-	t.st.segs = t.segs
-	if end := start + tw.Duration; end > t.st.build {
-		t.st.build = end
-		if t.st.done && !t.st.over && end > t.st.duration {
+	st := t.st
+	st.segs = t.segs
+	if end := start + tw.Duration; end > st.build {
+		st.build = end
+		if st.done && !st.over && !st.reverse && !st.holding && end > st.duration {
 			// The view arranges a timeline that reaches past the one the
-			// playhead came to rest in: ask for the frame that plays it,
-			// rather than rest on it, and report it as unfinished until
-			// then.
+			// playhead came to rest at the end of: it plays on from there,
+			// rather than rest, and is unfinished until it has played.
+			st.moving = true
 			t.c.AnimationFrame()
 		}
 	}
@@ -153,10 +160,7 @@ func (t *Timeline) Duration() time.Duration {
 	if t == nil {
 		return 0
 	}
-	if t.st.build > t.st.duration {
-		return t.st.build
-	}
-	return t.st.duration
+	return max(t.st.build, t.st.duration)
 }
 
 // Time is where the playhead is, from the start of the timeline.
@@ -164,13 +168,14 @@ func (t *Timeline) Time() time.Duration {
 	if t == nil {
 		return 0
 	}
-	if t.st.over {
+	st := t.st
+	if st.over {
+		if st.atStart {
+			return 0
+		}
 		return t.Duration()
 	}
-	if d := t.Duration(); t.st.t > d {
-		return d
-	}
-	return t.st.t
+	return min(st.t, t.Duration())
 }
 
 // Progress is how far the playhead is along the timeline, from 0 to 1.
@@ -178,35 +183,32 @@ func (t *Timeline) Progress() float32 {
 	if t == nil {
 		return 0
 	}
-	if t.st.over || t.st.done && t.Duration() <= 0 {
+	st, d := t.st, t.Duration()
+	if st.over || st.done && d <= 0 {
+		if st.atStart {
+			return 0
+		}
 		return 1
 	}
-	d := t.Duration()
 	if d <= 0 {
 		return 0
 	}
-	p := float32(t.st.t) / float32(d)
-	if p < 0 {
-		return 0
-	}
-	if p > 1 {
-		return 1
-	}
-	return p
+	return min(max(float32(st.t)/float32(d), 0), 1)
 }
 
-// Done reports whether the timeline came to rest at its end, its repeats
-// played out, for the view to go on as with Element.Settled.
+// Done reports whether the timeline came to rest, at its end with its
+// repeats played out, or at its start while it plays in Reverse, for the
+// view to go on as with Element.Settled.
 func (t *Timeline) Done() bool {
 	if t == nil || !t.st.done {
 		return false
 	}
-	if t.st.over {
-		// Less motion: it settled in the frame it was built in.
+	if t.st.over || t.st.reverse {
 		return true
 	}
 	// A view that arranges a longer timeline than the one the playhead came
-	// to rest in has not finished: the frame that plays it is coming.
+	// to rest at the end of has not finished: the frame that plays it is
+	// coming.
 	return t.st.build <= t.st.duration
 }
 
@@ -262,7 +264,11 @@ func (t *Timeline) label(name string) time.Duration {
 func (t *Timeline) show(s tweenSeg) float32 {
 	st := t.st
 	if st.over {
-		// Less motion: every tween is where it ends at once.
+		// Less motion: every tween is where the timeline comes to rest at
+		// once, at its end, or at its start when it plays back to it.
+		if st.atStart {
+			return s.from
+		}
 		return s.to
 	}
 	now := st.t
@@ -281,15 +287,11 @@ func (t *Timeline) show(s tweenSeg) float32 {
 	if now >= s.start+s.dur {
 		return s.to
 	}
-	p := float32(now-s.start) / float32(s.dur)
-	if p >= 1 {
-		return s.to
-	}
 	ease := s.ease
 	if ease == nil {
 		ease = Linear
 	}
-	return lerp(s.from, s.to, ease(p))
+	return lerp(s.from, s.to, ease(float32(now-s.start)/float32(s.dur)))
 }
 
 // begin starts a frame's build of the timeline: at the start of a frame it
@@ -311,7 +313,6 @@ func (t *Timeline) begin(o TimelineOptions) {
 		st.segs, st.labels = st.segs[:0], st.labels[:0]
 		t.segs = st.segs
 	}
-	t.prevStart, t.prevEnd = 0, 0
 	// The clock of this frame moved once already: what the options say now
 	// still decides what the pass shows, so a handler that paused, reversed
 	// or played the timeline over shows it in the frame it ran in, as a
@@ -319,23 +320,26 @@ func (t *Timeline) begin(o TimelineOptions) {
 	t.cue(o)
 }
 
-// tick moves the playhead on by this frame's time, once per frame.
+// tick moves the playhead on by this frame's time, once per frame, in the
+// direction the last frame played it.
 func (t *Timeline) tick(o TimelineOptions) {
 	st, c := t.st, t.c
-	if o.Repeat < RepeatForever || o.Delay < 0 || o.RepeatDelay < 0 {
-		panic("ui: a Timeline Repeat must be RepeatForever or nonnegative, and its delays nonnegative")
-	}
 	if !st.started {
 		st.started, st.at, st.run = true, c.now, o.Run
-	} else {
-		st.built = true
-		dt := c.now.Sub(st.at)
-		was := st.paused
-		st.at = c.now
-		// Time spent paused is not time played: a paused timeline asks for
-		// no frames, so the frame that lets the pause go carries the whole
-		// pause in its delta and would jump the playhead forward by it.
-		if dt > 0 && !o.Paused && !was {
+		t.cue(o)
+		return
+	}
+	st.built = true
+	dt := c.now.Sub(st.at)
+	st.at = c.now
+	// Only time the timeline played moves it: a paused, held or finished
+	// timeline asks for no frames, so the frame that lets it go carries
+	// the whole wait in its delta and would jump the playhead by it.
+	if dt > 0 && st.moving {
+		if st.reverse {
+			// Back to where it starts playing, not into its Delay.
+			st.raw = max(st.raw-dt, min(st.raw, o.Delay))
+		} else {
 			st.raw += dt
 		}
 	}
@@ -347,35 +351,52 @@ func (t *Timeline) tick(o TimelineOptions) {
 func (t *Timeline) cue(o TimelineOptions) {
 	st, c := t.st, t.c
 	if st.run != o.Run {
-		// Run plays the timeline over, in the frame it changes in.
+		// Run plays the timeline over, in the frame it changes in: from its
+		// start, or back from its end.
 		st.run, st.raw, st.done, st.over, st.rested = o.Run, 0, false, false, 0
+		if o.Reverse {
+			end, ok := st.end(o)
+			if !ok {
+				end = st.duration
+			}
+			st.raw = o.Delay + end
+		}
 	}
-	st.paused = o.Paused
+	st.reverse = o.Reverse
 	if c.rt.preferences().ReduceMotion {
 		// Values and poses go to their targets at once, and a sequence
 		// ends at its last value: the timeline is over where it would
-		// have ended, in this frame.
+		// have come to rest, in this frame.
 		st.over = true
 	}
 	if st.over {
-		st.t, st.done = st.duration, true
+		// Where Keyframes ends: back at the start when it plays back to it,
+		// or alternates an even number of times.
+		st.atStart = o.Reverse || o.Alternate && (o.Repeat+1)%2 == 0
+		st.t = st.duration
+		if st.atStart {
+			st.t = 0
+		}
+		st.done, st.moving, st.holding = true, false, true
 		if st.rested == 0 {
 			st.rested = c.rt.frame
 		}
 		return
 	}
-	raw, held := st.raw-o.Delay, false
+	held := false
 	if o.Seek != nil {
-		raw, held = *o.Seek, true
+		st.raw, held = o.Delay+*o.Seek, true
 	}
 	if o.Progress != nil {
-		raw, held = time.Duration(float64(*o.Progress)*float64(st.duration)), true
+		st.raw, held = o.Delay+time.Duration(float64(*o.Progress)*float64(st.duration)), true
 	}
-	if held {
-		// Hold the playhead where the scrubber asks and go on from
-		// there when it lets go.
-		st.raw = raw + o.Delay
+	// Nothing plays past the end, so that playing back, or a longer
+	// timeline, goes on from it at once.
+	if end, ok := st.end(o); ok {
+		st.raw = min(st.raw, o.Delay+end)
 	}
+	st.raw = max(st.raw, 0)
+	raw := st.raw - o.Delay
 	st.t, _, st.done = playhead(raw, st.duration, o.Repeat, o.Alternate, o.RepeatDelay)
 	if raw > 0 && st.duration <= 0 {
 		// A timeline whose tweens take no time is over as soon as a
@@ -384,10 +405,10 @@ func (t *Timeline) cue(o TimelineOptions) {
 		st.done = st.built
 	}
 	if o.Reverse {
-		if st.t = st.duration - st.t; st.t < 0 {
-			st.t = 0
-		}
+		st.done = raw <= 0
 	}
+	st.holding = o.Paused || held
+	st.moving = !st.done && !st.holding
 	if st.done {
 		if st.rested == 0 {
 			st.rested = c.rt.frame
@@ -405,9 +426,19 @@ func (t *Timeline) cue(o TimelineOptions) {
 		c.AnimationFrame()
 		return
 	}
-	if !o.Paused && !held {
+	if st.moving {
 		c.AnimationFrame()
 	}
+}
+
+// end returns how long the timeline plays with its repeats, false when it
+// repeats for ever or its duration is not known yet.
+func (st *timelineState) end(o TimelineOptions) (time.Duration, bool) {
+	if o.Repeat == RepeatForever || st.duration <= 0 {
+		return 0, false
+	}
+	plays := time.Duration(o.Repeat) + 1
+	return plays*st.duration + (plays-1)*o.RepeatDelay, true
 }
 
 // A Placement says where along the timeline a tween or a label starts: at
@@ -447,7 +478,13 @@ func WithPrevious() Placement { return Placement{kind: placeWith} }
 // At starts a tween d into the timeline.
 func At(d time.Duration) Placement { return Placement{kind: placeAt, at: d} }
 
-// AtLabel starts a tween at a Label of the timeline, offset by offset.
+// AtLabel starts a tween at a Label of the timeline, offset by offset, as
+// rows staggered from one label each start i times a step after it:
+//
+//	for i := range rows {
+//		rows[i] = tl.To(ui.Tween{From: 0, To: 1, Duration: 200 * time.Millisecond},
+//			ui.AtLabel("rows", time.Duration(i)*40*time.Millisecond))
+//	}
 func AtLabel(label string, offset ...time.Duration) Placement {
 	if len(offset) > 1 {
 		panic("ui: AtLabel takes at most one offset")
@@ -459,21 +496,6 @@ func AtLabel(label string, offset ...time.Duration) Placement {
 	return p
 }
 
-// Stagger returns how long the i-th element of a staggered row waits: i
-// times step, and nothing for the first. Give it to the placement of each
-// tween, as they start from one label and follow each other:
-//
-//	for i, row := range rows {
-//		rows[i].Opacity(tl.To(ui.Tween{From: 0, To: 1, Duration: 200 * time.Millisecond},
-//			ui.AtLabel("rows", ui.Stagger(i, 40*time.Millisecond))))
-//	}
-func Stagger(i int, step time.Duration) time.Duration {
-	if i <= 0 {
-		return 0
-	}
-	return time.Duration(i) * step
-}
-
 // tweenSeg is one tween as the timeline placed it.
 type tweenSeg struct {
 	start, dur time.Duration
@@ -483,8 +505,8 @@ type tweenSeg struct {
 
 // timelineState is what a Timeline keeps between frames: how long its
 // playhead has run, and the segments and labels its last frame built,
-// which this frame's playhead folds around. The engine keeps one per key
-// (timelines) and drops it when a frame does not build it.
+// which this frame's playhead folds around. An element keeps one per key
+// (state.timelines), and it goes with the element's state.
 type timelineState struct {
 	handle   *Timeline
 	frame    uint64        // the frame the playhead last moved in
@@ -492,14 +514,17 @@ type timelineState struct {
 	at       time.Time     // the time of that frame's clock
 	started  bool          // whether it has a time to measure from
 	built    bool          // whether a frame before this one built it
-	paused   bool          // whether the last pass asked for it to be paused
+	moving   bool          // whether the last pass played it: the time to the next frame is played
+	reverse  bool          // whether the last pass played it backward
+	holding  bool          // whether the last pass paused or held it
 	run      uint64        // the Run it plays, to restart when it changes
-	raw      time.Duration // how long it has played, unrolled
+	raw      time.Duration // where the playhead is through its repeats, its Delay included
 	duration time.Duration // the last frame's Duration, which folds this one
 	build    time.Duration // the Duration this frame is building
 	t        time.Duration // where the playhead is
 	done     bool          // it came to rest
 	over     bool          // less motion: it settled at once
+	atStart  bool          // less motion: where it settled is its start
 	rested   uint64        // the frame it came to rest in, for Arrived
 	segs     []tweenSeg
 	labels   []timelineLabel

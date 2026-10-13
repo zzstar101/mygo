@@ -62,27 +62,27 @@ func (s *app) view(c *ui.Context) {
 		s.seek = float32(s.scrub)
 		o.Progress = &s.seek
 	}
-	tl := ui.NewTimeline(c, "intro", o)
-	s.span = tl.Duration()
-
-	// One playhead for the whole intro: the card slides in as it grows, the
-	// title follows it, the rows come one after another, and the card
-	// bounces a little as it lands.
-	slide := tl.To(ui.Tween{From: -420, To: 0, Duration: 450 * time.Millisecond, Ease: ui.EaseOut})
-	grow := tl.To(ui.Tween{From: 0.9, To: 1, Duration: 450 * time.Millisecond, Ease: ui.EaseOut}, ui.WithPrevious())
-	fade := tl.To(ui.Tween{From: 0, To: 1, Duration: 300 * time.Millisecond}, ui.At(150*time.Millisecond))
-	tl.Label("rows") // where the card lands, at 450ms
-	names := [3]string{"Plan", "Build", "Ship"}
-	rows := [3]float32{}
-	for i := range rows {
-		rows[i] = tl.To(ui.Tween{From: 0, To: 1, Duration: 240 * time.Millisecond},
-			ui.AtLabel("rows", ui.Stagger(i, 90*time.Millisecond)))
-	}
-	bounce := tl.To(ui.Tween{From: 10, To: 0, Duration: 360 * time.Millisecond, Ease: ui.Bounce(ui.EaseOut)},
-		ui.At(450*time.Millisecond))
-
 	ui.Column(c).Fill().Center().Gap(18).Padding(24).Children(func() {
-		ui.Column(c).Key("card").Width(300).Padding(22).Gap(10).
+		// One playhead for the whole intro, kept by the card: the card
+		// slides in as it grows, the title follows it, the rows come one
+		// after another, and the card bounces a little as it lands.
+		card := ui.Column(c).Key("card")
+		tl := card.Timeline("intro", o)
+		s.span = tl.Duration()
+		slide := tl.To(ui.Tween{From: -420, To: 0, Duration: 450 * time.Millisecond, Ease: ui.EaseOut})
+		grow := tl.To(ui.Tween{From: 0.9, To: 1, Duration: 450 * time.Millisecond, Ease: ui.EaseOut}, ui.WithPrevious())
+		fade := tl.To(ui.Tween{From: 0, To: 1, Duration: 300 * time.Millisecond}, ui.At(150*time.Millisecond))
+		tl.Label("rows") // where the card lands, at 450ms
+		names := [3]string{"Plan", "Build", "Ship"}
+		rows := [3]float32{}
+		for i := range rows {
+			rows[i] = tl.To(ui.Tween{From: 0, To: 1, Duration: 240 * time.Millisecond},
+				ui.AtLabel("rows", time.Duration(i)*90*time.Millisecond))
+		}
+		bounce := tl.To(ui.Tween{From: 10, To: 0, Duration: 360 * time.Millisecond, Ease: ui.Bounce(ui.EaseOut)},
+			ui.At(450*time.Millisecond))
+
+		card.Width(300).Padding(22).Gap(10).
 			Radius(16).Background(t.Surface).
 			Translate(slide, bounce).Scale(grow, grow).
 			Children(func() {

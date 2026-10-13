@@ -1183,25 +1183,6 @@ func NewTester(view func(c *Context), width int, height int) *Tester {
 	return coreNewTester(func(c *context) { view(makeContext(c)) }, width, height)
 }
 
-// NewTimeline returns the timeline this window keeps under key, playing it
-// as o says. Every tween added to it shares one playhead, and returns the
-// value it shows in this frame.
-//
-//	tl := ui.NewTimeline(c, "intro", ui.TimelineOptions{Run: app.opened})
-//	x := tl.To(ui.Tween{From: -200, To: 0, Duration: 400 * time.Millisecond, Ease: ui.EaseOut})
-//	card.Translate(x, 0)
-//
-// Key tells apart the timelines of one window, so it must be stable from
-// frame to frame and the same in no two timelines. Play the timeline again,
-// or a changed one, by changing o.Run.
-func NewTimeline(c *Context, key any, o TimelineOptions) *Timeline {
-	_ctx := c.build()
-	if _ctx == nil {
-		return nil
-	}
-	return coreNewTimeline(_ctx, key, o)
-}
-
 // NumberInput creates a text input editing *value as a number between lo
 // and hi, which the arrows Up and Down, and the buttons beside it, step
 // by step. What is typed applies as soon as it is a number in range, and
@@ -4764,6 +4745,27 @@ func (_handle Element) TextSelection() (int, int) {
 	_ctx := _node.c
 	_ = _ctx
 	return _node.TextSelection()
+}
+
+// Timeline returns the timeline the element keeps under key, playing it
+// as o says. Every tween added to it shares one playhead, and returns the
+// value it shows in this frame.
+//
+//	card := ui.Column(c)
+//	tl := card.Timeline("intro", ui.TimelineOptions{Run: app.opened})
+//	x := tl.To(ui.Tween{From: -200, To: 0, Duration: 400 * time.Millisecond, Ease: ui.EaseOut})
+//	card.Translate(x, 0)
+//
+// Key tells apart the timelines of the element, as it does its Keyframes.
+// Play the timeline again, or a changed one, by changing o.Run.
+func (_handle Element) Timeline(key any, o TimelineOptions) *Timeline {
+	_node := _handle.node()
+	if _node == nil {
+		return nil
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Timeline(key, o)
 }
 
 // Tooltip shows s by the element when the pointer rests on it, or the

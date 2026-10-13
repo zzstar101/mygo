@@ -685,8 +685,12 @@ func (s *sequence) sample(now time.Time) (float32, bool) {
 	if s.done {
 		return s.value, true
 	}
+	elapsed := now.Sub(s.start)
+	if elapsed < 0 {
+		return s.from, false // delayed
+	}
 	d := s.frames[len(s.frames)-1].At
-	at, iteration, done := playhead(now.Sub(s.start), d, s.options.Repeat, s.options.Alternate, s.options.RepeatDelay)
+	at, iteration, done := playhead(elapsed, d, s.options.Repeat, s.options.Alternate, s.options.RepeatDelay)
 	if done {
 		return s.final(), true
 	}

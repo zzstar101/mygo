@@ -567,6 +567,7 @@ type state struct {
 	crec         *contentRec
 	pose         *poseRec
 	sequences    map[any]*sequence
+	timelines    map[any]*timelineState
 	shortcuts    []shortcut
 	delivered    []shortcut
 
