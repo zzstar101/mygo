@@ -267,6 +267,11 @@ func (ed *editor) key(c *context, st *state, k editEvent) {
 		}
 		return
 	case KeyEnter:
+		// OnEnter sees the Enter before the editor takes it, as OnPaste
+		// does a paste: taken, it changes nothing but what fn sets.
+		if ed.onEnter != nil && ed.enter(k.mods) {
+			return
+		}
 		if ed.multiline {
 			ed.insert("\n")
 		} else {
@@ -441,4 +446,11 @@ func (ed *editor) drag(x, y float32) {
 	if ed.area != nil {
 		ed.area.reveal = true
 	}
+}
+
+// enter asks onEnter whether it takes an Enter with mods held.
+func (ed *editor) enter(mods Modifiers) bool {
+	ed.entering = true
+	defer func() { ed.entering = false }()
+	return ed.onEnter(Enter{Mods: mods, ed: ed})
 }

@@ -57,3 +57,28 @@ func TitleBarScript(tb platform.TitleBar, zoom float64) string {
 	p, _ := json.Marshal(NewTitleBar(tb, zoom))
 	return `window.__mygo&&window.__mygo.receive({"t":"event","n":"` + TitleBarEvent + `","p":` + string(p) + `});`
 }
+
+// PreferencesEvent tells a page the accent color and the accessibility
+// settings of the desktop. The bridge keeps the accent in the --mygo-accent
+// CSS variable and the text scale in --mygo-text-scale.
+const PreferencesEvent = "mygo:preferences"
+
+// Preferences is a page's view of the desktop's settings.
+type Preferences struct {
+	// Accent is the color of the desktop's controls as "#rrggbb", or empty
+	// where the desktop has none.
+	Accent string `json:"accent"`
+	// ReduceMotion reports that the desktop asks for less animation.
+	ReduceMotion bool `json:"reduceMotion"`
+	// HighContrast reports that the desktop uses a contrast theme.
+	HighContrast bool `json:"highContrast"`
+	// TextScale is the factor the desktop asks text to grow by; 1 is usual.
+	TextScale float64 `json:"textScale"`
+}
+
+// PreferencesScript delivers PreferencesEvent at document start, after the
+// bridge has registered the handler that turns it into CSS variables.
+func PreferencesScript(p Preferences) string {
+	b, _ := json.Marshal(p)
+	return `window.__mygo&&window.__mygo.receive({"t":"event","n":"` + PreferencesEvent + `","p":` + string(b) + `});`
+}

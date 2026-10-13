@@ -52,6 +52,23 @@ ui.TextArea(c, &app.notes).Height(160)
   })
   ```
 
+- `OnEnter(fn)` sees an Enter before the input takes it. Returning true
+  takes the Enter: a text area inserts no newline, and a `TextInput` does
+  not submit. fn may run between frames, so it reads the text and replaces
+  it through its `ui.Enter` rather than an `Element` kept from the view, as
+  a chat composer sends with Enter and breaks the line with Shift+Enter:
+
+  ```go
+  ui.TextArea(c, &app.draft).Lines(1, 8).OnEnter(func(e ui.Enter) bool {
+  	if e.Mods&ui.Shift != 0 {
+  		return false // Shift+Enter breaks the line
+  	}
+  	app.send(e.Text())
+  	e.SetText("")
+  	return true
+  })
+  ```
+
 A `TextInput` too narrow for its text keeps the caret in view while it has
 the focus, and shows the start of its text without it.
 

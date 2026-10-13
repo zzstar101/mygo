@@ -53,7 +53,7 @@ func (ed *editor) build(c *ui.Context, buf *Buffer, o options) ui.Element {
 		label = "Code editor"
 	}
 	e.Role(ui.RoleTextField).Label(label).Access(ed.accessibility)
-	if !o.readOnly {
+	if !o.readOnly && !o.noInputMethod {
 		e.HandleTextInput(ed)
 	}
 	e.HandleInput(ed.input)
@@ -82,6 +82,16 @@ func (ed *editor) build(c *ui.Context, buf *Buffer, o options) ui.Element {
 			ed.restoreScroll()
 			ed.doReveal()
 		}
+	}
+	if !o.readOnly && o.noInputMethod {
+		// No text input client for an input method to compose in, but the
+		// host's text input stays on at the caret, where it has scrolled
+		// to: without it keys type no text, which then comes as InputText.
+		caret := ui.Rect{W: 2, H: ed.view.lineHeight}
+		if r, ok := ed.caretRect(ed.primary().head); ok {
+			caret = ui.Rect{X: ed.textX + r.X - ed.scrollX, Y: float32(float64(r.Y) - ed.scrollY), W: r.W, H: r.H}
+		}
+		e.TextCaret(caret)
 	}
 	// Hovering: ask what the text under the resting pointer is. The
 	// editor hears no move once the pointer has left it, so its hover

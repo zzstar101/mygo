@@ -53,7 +53,7 @@ func textInputBase(c *context, value *string, multiline bool) *node {
 		ed.setText(*value)
 		ed.compose = ""
 	}
-	ed.readOnly, ed.password, ed.lines, ed.onPaste = false, false, [2]int{}, nil
+	ed.readOnly, ed.password, ed.lines, ed.onPaste, ed.onEnter = false, false, [2]int{}, nil, nil
 	ed.ranges = ed.ranges[:0]
 	e.onValueInput(stringInput)
 
@@ -95,6 +95,78 @@ func (e *node) OnPaste(fn func(text string) bool) *node {
 		ed.onPaste = fn
 	}
 	return e
+}
+
+// OnEnter has fn see an Enter in the text input before the editor takes
+// it, on the main thread as the key comes. fn reports whether it took the
+// Enter; one taken changes nothing: a text area inserts no newline, and a
+// single-line input does not submit. Like ReadOnly, it holds for the input
+// that comes until the next frame.
+//
+// fn may run between frames, where an Element kept from the view is no
+// longer valid: it reads and replaces the text through e instead, as a
+// chat composer sends with Enter, clears what it sent, and breaks the line
+// with Shift+Enter:
+//
+//	ui.TextArea(c, &app.draft).OnEnter(func(e ui.Enter) bool {
+//		if e.Mods&ui.Shift != 0 {
+//			return false
+//		}
+//		app.send(e.Text())
+//		e.SetText("")
+//		return true
+//	})
+func (e *node) OnEnter(fn func(e Enter) bool) *node {
+	if ed := e.st.editor; ed != nil && e.flags&flagEditable != 0 {
+		ed.onEnter = fn
+	}
+	return e
+}
+
+// Enter is an Enter pressed in a text input, as OnEnter's fn sees it. It
+// is valid while fn runs.
+type Enter struct {
+	// Mods are the modifiers held with the Enter.
+	Mods Modifiers
+	ed   *editor
+}
+
+// Text returns the text of the input as the Enter comes, which may be
+// ahead of the bound value: that takes what is typed as the next frame is
+// built.
+func (e Enter) Text() string {
+	if e.ed == nil || !e.ed.entering {
+		return ""
+	}
+	return e.ed.String()
+}
+
+// SetText replaces the text of the input, and its bound value, as the app
+// does by setting the value as the view is built: a composer clears the
+// draft it sent. Writing the bound value from fn is not enough, as the
+// editor writes what it holds over it.
+func (e Enter) SetText(s string) {
+	ed := e.ed
+	if ed == nil || !ed.entering {
+		return
+	}
+	if ed.document != nil {
+		// A TextBuffer takes the text as when the app sets it.
+		ed.document.Set(s)
+		ed.loadBuffer(ed.document.Snapshot())
+		ed.bufferDirty = false
+	} else {
+		ed.setText(s)
+		ed.compose = ""
+		if ed.value != nil {
+			*ed.value = s
+		}
+	}
+	if w := ed.client; w != nil {
+		// What the view built before the Enter shows the old text.
+		w.rt.consumed = true
+		w.rt.requestFrame()
+	}
 }
 
 // Lines makes a text area as high as its text, wrapped at its width, from

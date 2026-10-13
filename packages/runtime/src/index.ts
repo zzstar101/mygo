@@ -139,6 +139,26 @@ export function onFileDrop(listener: (drop: FileDrop) => void): () => void {
   return on<FileDrop>("mygo:file-drop", listener);
 }
 
+/** The accent color and the accessibility settings of the desktop. */
+export interface ThemePreferences {
+  /** The accent color as "#rrggbb", or "" where the desktop has none. */
+  accent: string;
+  /** Whether the desktop asks for less animation. */
+  reduceMotion: boolean;
+  /** Whether the desktop uses a contrast theme. */
+  highContrast: boolean;
+  /** The factor the desktop asks text to grow by; 1 is usual. */
+  textScale: number;
+}
+
+/** Calls listener when the accent color or the accessibility settings of the
+ * desktop change. The first paint gets them from the --mygo-accent and
+ * --mygo-text-scale CSS variables of :root; `onPreferences` sees the changes
+ * that follow, and on DOMContentLoaded. */
+export function onPreferences(listener: (preferences: ThemePreferences) => void): () => void {
+  return on<ThemePreferences>("mygo:preferences", listener);
+}
+
 /** The window hosting the page, e.g. for a custom title bar. */
 export const currentWindow: WindowControls = {
   minimize: async () => runtime().window.minimize(),

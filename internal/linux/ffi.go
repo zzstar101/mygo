@@ -171,6 +171,13 @@ var (
 	gDBusConnectionGetUniqueName   func(conn ptr) ptr
 )
 
+// GIO's network monitor (network.go).
+var (
+	gNetworkMonitorGetDefault          func() ptr
+	gNetworkMonitorGetNetworkAvailable func(monitor ptr) bool
+	gNetworkMonitorGetNetworkMetered   func(monitor ptr) bool
+)
+
 // GDK and GdkPixbuf.
 var (
 	gdkScreenGetRGBAVisual      func(screen ptr) ptr
@@ -597,6 +604,9 @@ func load() error {
 	mustBind(i, &gDBusConnectionCallSync, "g_dbus_connection_call_sync")
 	mustBind(i, &gDBusConnectionSignalSubscribe, "g_dbus_connection_signal_subscribe")
 	mustBind(i, &gDBusConnectionGetUniqueName, "g_dbus_connection_get_unique_name")
+	mustBind(i, &gNetworkMonitorGetDefault, "g_network_monitor_get_default")
+	mustBind(i, &gNetworkMonitorGetNetworkAvailable, "g_network_monitor_get_network_available")
+	mustBind(i, &gNetworkMonitorGetNetworkMetered, "g_network_monitor_get_network_metered")
 
 	d := libGDK
 	mustBind(d, &gdkScreenGetRGBAVisual, "gdk_screen_get_rgba_visual")

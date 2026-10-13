@@ -9,6 +9,21 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 )
 
+// Color is an 8-bit sRGB color with straight (not premultiplied) alpha.
+// Its zero value is transparent.
+type Color struct {
+	R, G, B, A uint8
+}
+
+// String returns the color as "#rrggbb", or "#rrggbbaa" when it is not
+// opaque: the forms a CSS color and WindowOptions.BackgroundColor take.
+func (c Color) String() string {
+	if c.A == 255 {
+		return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
+	}
+	return fmt.Sprintf("#%02x%02x%02x%02x", c.R, c.G, c.B, c.A)
+}
+
 // parseColor parses a CSS color: #rgb, #rgba, #rrggbb, #rrggbbaa,
 // rgb(r g b), rgba(r, g, b, a) or "transparent".
 func parseColor(s string) (platform.Color, error) {

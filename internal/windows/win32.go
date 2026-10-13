@@ -280,6 +280,9 @@ const (
 	// wmAppDeviceRemoved tells the application window that the GPU device
 	// of DirectComposition was removed (compositor.go).
 	wmAppDeviceRemoved = wmApp + 5
+	// wmAppNetwork tells the application window that the connectivity
+	// hint changed (network.go). wmApp + 6 is a flyout's wmAppDismiss.
+	wmAppNetwork = wmApp + 7
 
 	wsOverlapped       = 0x00000000
 	wsPopup            = 0x80000000

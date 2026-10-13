@@ -28,18 +28,22 @@ type options struct {
 	autoClose     bool
 	folding       bool
 	activeLine    bool
+	caretShape    CaretShape
 	fitContent    bool
 	placeholder   string
 	label         string
 	theme         *Theme
 	bindings      []Binding
 	gutterMarks   []GutterMark
+	backgrounds   []LineBackground
 	diffBase      *Buffer
 	onCompletion  func(CompletionRequest)
 	onHover       func(HoverRequest)
 	onDefinition  func(int)
 	onGutterClick func(int)
 	contextMenu   func(m *ui.Menu)
+	onInput       func(ui.InputEvent) bool
+	noInputMethod bool
 	// The parts' render functions, nil for the editor's own.
 	renderFindBar     func(*ui.Context, ui.Element, *FindBar)
 	renderGoToLine    func(*ui.Context, ui.Element, *GoToLineBar)
@@ -135,7 +139,8 @@ type editor struct {
 	gutterW    float32
 	textX      float32
 	viewH      float32
-	focused    bool // the editor and its window have the keyboard
+	shown      [2]int // the first and last lines the last frame showed
+	focused    bool   // the editor and its window have the keyboard
 	blinkStart time.Time
 	services   ui.Services
 	chord      *Binding
