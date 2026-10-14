@@ -67,6 +67,7 @@ keep it: the app's own setting is left as it is.`)
 	openPage := flags.Bool("open", true, "with -web, open the app in the browser")
 	lang := flags.String("lang", "", "run the app in this language (as de, or the pseudo locales en-XA and ar-XB), without keeping it")
 	hot := flags.Bool("hot", false, "change the code of the running app on save, restarting it only when that cannot be done")
+	noReloadState := flags.Bool("no-reload-state", false, "let the app start fresh on every rebuild, without the state of the build it replaces")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -90,7 +91,20 @@ keep it: the app's own setting is left as it is.`)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	s := &devSession{root: c.root, sign: devSign(c, *sign), name: devConfig(c).Name, env: []string{"MYGO_ENV=development"}}
+	// The dev channel the app hands its state over on, before it is
+	// replaced and after it starts again. Without it, a rebuild starts a
+	// fresh app, as it always did.
+	var reload *devReloadServer
+	if !*noReloadState {
+		reload, err = startDevReloadServer()
+		if err != nil {
+			warnf("Reloading without the app's state: %v", err)
+			reload = nil
+		} else {
+			defer reload.close()
+		}
+	}
+	s := &devSession{root: c.root, sign: devSign(c, *sign), name: devConfig(c).Name, env: []string{"MYGO_ENV=development"}, reload: reload}
 	if *hot {
 		s.hotBuild = newHotBuild(c)
 	}
@@ -249,6 +263,8 @@ type devSession struct {
 	// build began.
 	inputs *buildInputs
 	stamp  map[string]string
+	// reload is the dev channel to the app, or nil with --no-reload-state.
+	reload *devReloadServer
 
 	// live is app, which a build stops before it starts.
 	liveMu sync.Mutex
@@ -403,13 +419,17 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 			s.setApp(nil)
 			var exit *exec.ExitError
 			if errors.As(err, &exit) && exit.ExitCode() == devRelaunchCode {
-				if s.hot != nil && s.hot.patched {
-					// The build on disk is older than the app that quit.
-					restart = true
-					start()
-					continue
-				}
-				// mygo.App.Relaunch: start the same build again.
+			if s.hot != nil && s.hot.patched {
+				// The build on disk is older than the app that quit.
+				restart = true
+				start()
+				continue
+			}
+			// mygo.App.Relaunch: start the same build again, with the
+			// state it pushed as it quit.
+			if s.reload != nil {
+				s.reload.awaitState(reloadPushTimeout)
+			}
 				p, err := s.launch(exe)
 				if err != nil {
 					con.println("  " + red(con.sym.fail) + " Relaunching " + s.name)
@@ -742,6 +762,11 @@ func (s *devSession) buildAndLaunch(ctx context.Context, t *task, running [32]by
 	} else if err := placeBuild(stage, dir, res); err != nil {
 		return nil, sum, err
 	}
+	// Ask the app that is running for its state before it goes: the build
+	// that starts next gets it, so the window it shows is not empty.
+	if s.reload != nil {
+		s.reload.prepare()
+	}
 	s.stopLive()
 	if p, err = s.launch(exe); err != nil {
 		return nil, sum, err
@@ -857,6 +882,18 @@ func (s *devSession) icon(c *Config) ([]byte, error) {
 	return s.icns, nil
 }
 
+// reloadEnv is the dev channel in the environment of the app. A session
+// without one, as mygo dev --no-reload-state, says so in the same variable:
+// the app then neither saves nor restores, and every rebuild starts fresh,
+// even when a MYGO_DEV_SOCKET of something else is in the environment.
+func (s *devSession) reloadEnv() []string {
+	path := ""
+	if s.reload != nil {
+		path = s.reload.path
+	}
+	return []string{devReloadEnv + "=" + path}
+}
+
 // launch starts a build. MYGO_DEV=1 tells it that mygo dev runs it, which
 // mygo.App.Relaunch asks to start it again.
 func (s *devSession) launch(exe string) (*devProcess, error) {
@@ -883,6 +920,7 @@ func (s *devSession) launch(exe string) (*devProcess, error) {
 	if hot != nil {
 		cmd.Env = append(cmd.Env, "MYGO_HOT="+hot.addr())
 	}
+	cmd.Env = append(cmd.Env, s.reloadEnv()...)
 	setProcessGroup(cmd)
 	err = cmd.Start()
 	stdout.Close()

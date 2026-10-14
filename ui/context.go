@@ -242,16 +242,26 @@ func (c *context) newElement(k kind) *node {
 	e.kind = k
 	p := c.parent
 	e.id = mix(p.id, uint64(p.nchild)+uint64(k)<<56)
+	if c.rt.reload {
+		// The same name in the next build of the same view (reload.go).
+		e.reloadID = mix(p.reloadID, uint64(p.nchild)+uint64(k)<<56)
+	}
 	e.dir = p.dir &^ dirSet
 	keyed := c.keySet
 	if c.keySet {
 		e.id = keyedID(p.id, c.nextKey)
+		if c.rt.reload {
+			e.reloadID = mix(p.reloadID, reloadKey(c.nextKey))
+		}
 		e.key = c.nextKey
 		c.keySet, c.nextKey = false, nil
 	}
 	p.add(e)
 	var built bool
 	e.st, built = c.rt.lookState(e.id)
+	// The element appears in this frame: name it, and give it back what the
+	// build before this one kept of it (reload.go).
+	c.rt.reloadBorn(e)
 	if keyed && built {
 		c.rt.duplicateKey(e.id, e.key)
 	}
@@ -273,12 +283,22 @@ func (c *context) rekey(e *node, k any) {
 	if id != e.id {
 		rt.unlook(e.st)
 	}
+	if rt.reload {
+		reloadParent := uint64(0)
+		if e.parent != nil {
+			reloadParent = e.parent.reloadID
+		}
+		e.reloadID = mix(reloadParent, reloadKey(k))
+	}
 	st, built := rt.lookState(id)
 	if built && id != e.id {
 		// Another element of the pass has the key under the same parent.
 		rt.duplicateKey(id, k)
 	}
 	e.id, e.st, e.key = id, st, k
+	// The element appears in this frame: name it, and give it back what the
+	// build before this one kept of it (reload.go).
+	rt.reloadBorn(e)
 	if rt.insp.open {
 		rt.insp.noteKey(id, k)
 		if id == rt.insp.selected {
@@ -817,6 +837,15 @@ type state struct {
 	// snap is where a container that snaps comes to rest (ScrollSnap),
 	// which its layout sets.
 	snap snapper
+	// reloadID names the element across a reload of mygo dev (reload.go),
+	// and what a reload keeps of it until the element is built again.
+	reloadID      uint64
+	reloadScroll  bool
+	reloadScrollX float64
+	reloadScrollY float64
+	reloadSel     bool
+	reloadCaret   int
+	reloadAnchor  int
 	// startX and startY are the offset before frame moveFrame moved it.
 	moveFrame      uint64
 	startX, startY float64

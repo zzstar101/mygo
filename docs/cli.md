@@ -112,6 +112,14 @@ With `-hot`, saving Go code [changes the running app in place](hot-reload.md),
 usually in about a tenth of a second: its windows, web pages and memory stay. A
 change that cannot be applied that way, such as to the fields of a struct,
 rebuilds and restarts it as above.
+A reload does not have to start the app fresh: before the running build
+quits, mygo dev asks it for the state it should keep, and the build that
+starts next gets it as it starts, before the `WhenReady` callbacks create
+its windows. An app says what to keep with `App.OnReload`; MyGo keeps the
+window's place, the scroll and the focus of its elements, and the caret of
+the input the user was in, by itself; the window is shown once it drew what
+it restored, so a reload does not flash an empty window. See
+[Reloading](reload.md).
 
 On a terminal, each step shows a spinner with what it does, such as the Go
 packages being compiled, then how long it took; what the dev server and the
@@ -149,6 +157,7 @@ compiles. `o` opens the page again.
 
 | Flag | |
 |---|---|
+| `-no-reload-state` | restarts the app without the state of the build it replaces |
 | `-skip-dev-command` | does not run `devCommand`, e.g. when the dev server already runs |
 | `-hot` | changes the code of the running app on save, restarting it only when that cannot be done |
 | `-sign` | the identity that signs the development app on macOS (default: an Apple Development identity, see below, else `-`, ad hoc) |

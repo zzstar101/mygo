@@ -73,6 +73,7 @@ framework safely. Read it before changing anything under `internal/`.
 ├── events.go           listener lists and the Preventable event types
 ├── single_instance.go  RequestSingleInstanceLock over a Unix socket
 ├── dev.go signal_*.go  IsDev, the `mygo dev` ready signal, quitting on SIGINT/SIGTERM
+├── reload*.go          what a build of `mygo dev` hands the build that replaces it
 ├── backend_*.go        picks the backend per GOOS
 ├── internal/
 │   ├── platform/       the contract every backend implements
@@ -5280,6 +5281,38 @@ renderer's (`gputest.Compare`).
     notifier (`notify_*.go`: kqueue on the files on macOS, inotify on the
     directories on Linux, `ReadDirectoryChangesW` on Windows) only says
     when to look, and a change counts once it holds still for 15 ms.
+    Before the running build is asked to quit, it is asked for its state:
+    the app connects at startup to a socket `mygo dev` listens on in the
+    per-user runtime directory (`mygo-dev-<uid>-<nonce>.sock`, mode 0600,
+    named `MYGO_DEV_SOCKET` in the environment, unset at once so the
+    processes the app starts never see it), says hello, and is handed the
+    state of the build it replaced, if that build left one. The path names
+    one session, so two `mygo dev` runs on the same project listen apart
+    and each app reaches only the session that started it. A rebuild sends
+    `prepare-reload`; the app saves on the main thread and answers with its
+    windows and its values; the connection is read on the side, so a slow
+    app only costs the reload its wait (2 s), never the process. The state
+    stays in mygo dev's memory until the build that starts next says hello
+    and takes it: nothing reaches disk, so a build started by hand or left
+    running by a build that failed to compile is never handed a stale one.
+    `App.Relaunch` takes the same road the other way round: the app hands
+    its state over as its quit sequence begins, before it closes the
+    windows the state holds, and exits with code 75, and the build that
+    starts next gets it (`reload_dev.go`; `reload_browser.go` keeps the
+    browser builds, where the page reloads itself, out of it).
+    What the app keeps of a window is its place, whether it was showing and
+    whether it had the focus, applied before the window is created, and the
+    window is held back until it drew the restored state (`reloadedWindow`),
+    so a reload does not flash; a window takes the state of the window its
+    `StateKey` names, wherever the new build creates it, and a window the
+    state has none for starts fresh. What package ui keeps is where its
+    elements were scrolled, which had the focus and where the caret and the
+    selection of the input the user was in were, named by a hash of their
+    key and their place in the view (`ui/reload.go`, stable across
+    processes, unlike `keyedID`'s per-process seed), which a reload applies
+    as the elements are created in its first frame and drops for an element
+    that moved. The text of an input is the app's own state, which
+    `App.OnReload` brings back.
   - *Watching.* Exactly what the build reads, from `go list -deps` after
     every build: the directories of the compiled packages outside GOROOT and
     the module cache (so local `replace` modules too), embedded files,

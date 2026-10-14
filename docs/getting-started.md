@@ -219,7 +219,8 @@ The apps run where they are, but to ship them to users, sign them: see
     windows), `examples/frameless` (a custom title bar) and
     `examples/native` (menus, a tray icon, dialogs, notifications, a
     global shortcut, the clipboard and dark mode);
-  - with native UI: `examples/clipboard` (copying and dragging text, HTML,
+  - with native UI: `examples/reload-state` (what survives a reload of
+    `mygo dev`), `examples/clipboard` (copying and dragging text, HTML,
     lazy JSON, and file lists), `examples/counter-native` (a counter with a test of its
     view), `examples/vibrancy` (a translucent sidebar under an inset title
     bar, its material picked in it), `examples/effort-slider` (a web

@@ -89,6 +89,10 @@ type Application struct {
 	onWindowCreated   listeners[func(*Window)]
 
 	onNotificationClick listeners[func(string)]
+
+	// reload is OnReload: what the app hands from one `mygo dev` build to
+	// the next.
+	reload ReloadHandlers
 }
 
 // App is the application singleton.
@@ -130,6 +134,10 @@ func (a *Application) Run() error {
 		return err
 	}
 	a.initialized = true
+	// The dev channel, when mygo dev started this build with state
+	// handover: what the build before it saved is read before the event
+	// loop runs, so that the app's Restore and its first windows get it.
+	startDevReload()
 	// Settings made before Run, which the backend could not take yet.
 	Theme.apply()
 	if load := pendingGTKCSS; load != nil {
@@ -251,6 +259,12 @@ func (a *Application) prepareQuit() bool {
 		return false
 	}
 	a.quitting = true
+	if a.relaunch {
+		// The app starts itself again, and mygo dev turns that into a new
+		// build: hand the state over now, while the windows the reload
+		// keeps are still here, as a reload does before it stops a build.
+		saveDevReloadOnRelaunch()
+	}
 	for _, w := range Windows() {
 		if !w.close() {
 			a.quitting = false
@@ -282,8 +296,11 @@ func (a *Application) finish() {
 		saveWindowStates()
 		fire(&a.onQuit)
 		if a.relaunch {
+			// mygo dev turns the relaunch into a new build, which got the
+			// state this one saved as the quit sequence began.
 			relaunchNow() // after OnQuit, which releases the single instance lock
 		}
+		stopDevReload()
 		loop.shutdown()
 	})
 }
@@ -323,10 +340,16 @@ func (a *Application) handleReady() {
 	close(a.readyCh)
 
 	backend().SetApplicationMenu(menu.snapshot())
+	// A reload restores before the app's own callbacks, which create the
+	// windows: the state of the build before this one is in place when
+	// the app looks at it.
+	startReloadRestore()
 	fire(&a.onReady)
 	for _, fn := range fns {
 		fn()
 	}
+	// The windows of the reload are the ones just created.
+	finishReloadRestore()
 	// After the windows the app opens when ready, which URLs may target.
 	postMain(launchArgs)
 }

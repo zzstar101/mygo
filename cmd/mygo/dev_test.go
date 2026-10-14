@@ -68,6 +68,14 @@ func TestMain(m *testing.M) {
 		_, _ = io.Copy(io.Discard, conn)
 		conn.Close()
 		os.Exit(0)
+	case "reload-app":
+		// Like an app mygo dev launched with a dev channel to hand its
+		// state over on.
+		if err := fakeReloadApp(); err != nil {
+			fmt.Fprintln(os.Stderr, "mygo:", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 
 	case "hang":
 		signal.Ignore(syscall.SIGTERM)

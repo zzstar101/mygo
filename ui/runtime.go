@@ -189,6 +189,12 @@ type engine struct {
 	noLayoutCache   bool
 
 	states map[uint64]*state
+	// reload is set when the window was launched by mygo dev with state
+	// handover: elements then carry a reloadID, and keep what a reload
+	// should give back (reload.go). reloadApply is what the build before
+	// this one kept, until the elements it names are built.
+	reload      bool
+	reloadApply map[uint64]reloadEntry
 	// free are states pruned, which new elements take: rows coming into
 	// a list's view take those of rows that went out of it.
 	free  []*state
