@@ -348,3 +348,42 @@ func TestReloadNamesElementsTheSameWayInEveryBuild(t *testing.T) {
 		t.Errorf("the same view named its elements %v and %v", a, b)
 	}
 }
+
+// reloadOverlayView is the view of a window holding an input, and an
+// overlay holding one too: the layer of overlays is a second tree over the
+// window's, whose elements are named apart from the window's.
+func reloadOverlayView(root, over *string) func(c *context) {
+	return func(c *context) {
+		coreTextInput(c, root).Label("Root").Absolute().Left(10).Top(10).Width(200)
+		coreOverlay(c, func() {
+			coreTextInput(c, over).Label("Overlay").Absolute().Left(10).Top(150).Width(200)
+		})
+	}
+}
+
+// TestReloadKeepsTheFocusInTheOverlay is what a reload promises the
+// elements of an overlay: the input the user was typing in gets the focus
+// back, not the window's input, which sits at the same place in the tree
+// of its own layer.
+func TestReloadKeepsTheFocusInTheOverlay(t *testing.T) {
+	root, over := "", ""
+	tt := reloadTester(reloadOverlayView(&root, &over), 400, 300, nil)
+	if err := tt.Click("Overlay"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("abc")
+	if over != "abc" {
+		t.Fatalf("the overlay input holds %q, want %q", over, "abc")
+	}
+	blob := tt.rt.reloadSave()
+
+	over = "abc" // what the app restored, in the build that replaces it.
+	next := reloadTester(reloadOverlayView(&root, &over), 400, 300, blob)
+	if !next.Focused("Overlay") {
+		t.Errorf("the focus came back to the window's input, not the overlay's")
+	}
+	next.Type("xy")
+	if over != "abcxy" {
+		t.Errorf("the overlay input holds %q after a reload, want %q: the typing went to the window's input, which holds %q", over, "abcxy", root)
+	}
+}

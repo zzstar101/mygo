@@ -144,6 +144,10 @@ func (c *context) reset(now time.Time, w, h float32) {
 	root := c.alloc()
 	root.c = c
 	root.id = 1
+	// The window's elements are named from the root's name, and an
+	// overlay's from its layer's: an element at the same place in an
+	// overlay is not the element the window has there.
+	root.reloadID = root.id
 	root.kind = kindBox
 	root.width, root.height = px(w), px(h)
 	root.st = c.rt.stateFor(root.id)
@@ -216,6 +220,7 @@ func (c *context) overlayRoot() *node {
 		o := c.alloc()
 		o.c = c
 		o.id = overlayID
+		o.reloadID = o.id
 		o.kind = kindBox
 		o.flags = flagAbsolute | flagPassThrough
 		o.dir = c.root.dir
