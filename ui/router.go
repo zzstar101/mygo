@@ -5,6 +5,7 @@ import (
 	"path"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -423,6 +424,10 @@ func (r *Route) Match(pattern string) bool {
 			}
 			params = append(params, [2]string{rest, strings.Join(r.segments[min(i, len(r.segments)):], "/")})
 			r.params, r.rest = params, min(i, len(r.segments))
+			// The page holds a layout: its elements keep their state
+			// as the pages inside change, so name it after the parts
+			// of the path the layout takes, not the whole path.
+			r.namePage(r.offset + r.rest)
 			return true
 		}
 		if i >= len(r.segments) {
@@ -435,6 +440,39 @@ func (r *Route) Match(pattern string) bool {
 	}
 	r.params, r.rest = params, -1
 	return true
+}
+
+// namePage names the page after the parts of the path it shows, the ones
+// of the page itself and of the layouts around it, so that a build that
+// restores the route names the page as the build that quit did, and the
+// elements inside keep their state through a reload of mygo dev. The
+// number of a page in the history cannot name it: a build that starts on
+// another route numbers its pages differently. parts is how many parts of
+// the path the page shows, the whole path at first, then what a {name...}
+// of a layout takes.
+func (r *Route) namePage(parts int) {
+	pg := r.page
+	if pg == nil {
+		return
+	}
+	segments := segmentsOf(r.entry.loc)
+	if parts < 0 || parts > len(segments) {
+		parts = len(segments)
+	}
+	var parent uint64
+	if pg.parent != nil {
+		parent = pg.parent.reloadID
+	}
+	key := "page:" + strconv.Itoa(r.level) + ":" + strings.Join(segments[:parts], "/")
+	pg.reloadID = mix(parent, reloadKey(key))
+	if pg.st != nil {
+		// The page was born under the number the router gave it: its own
+		// state is kept under the name it shows, as its elements are.
+		pg.st.reloadID = pg.reloadID
+	}
+	if rt := r.router.rt; rt != nil && rt.reloadApply != nil {
+		rt.reloadAt(pg)
+	}
 }
 
 // Param returns what the wildcard name of the pattern Match last matched
@@ -696,6 +734,9 @@ func (r *Router) page(c *context, parent *Route, e *routeEntry, fn func(*Route),
 	pg := coreColumn(c).Key(r.pageAt(e, route.level)).Grow(1).MinWidth(0).MinHeight(0)
 	route.page = pg
 	route.pageEpoch = c.rt.epoch
+	// A page with no {name...} in its pattern shows the whole path: name
+	// it now, so that its elements are named before they are built.
+	route.namePage(len(segments))
 	pg.flags |= flagPage
 	if leaving {
 		pg.flags |= flagInert
