@@ -452,7 +452,10 @@ func (r *Route) Match(pattern string) bool {
 // of a layout takes.
 func (r *Route) namePage(parts int) {
 	pg := r.page
-	if pg == nil {
+	if !reloadable || pg == nil || r.router == nil || r.router.rt == nil || !r.router.rt.reload {
+		// Only a window mygo dev launched with state handover names its
+		// elements across builds: other apps do not parse the path of
+		// every page in every frame for it.
 		return
 	}
 	segments := segmentsOf(r.entry.loc)
@@ -470,7 +473,7 @@ func (r *Route) namePage(parts int) {
 		// state is kept under the name it shows, as its elements are.
 		pg.st.reloadID = pg.reloadID
 	}
-	if rt := r.router.rt; rt != nil && rt.reloadApply != nil {
+	if rt := r.router.rt; rt.reloadApply != nil {
 		rt.reloadAt(pg)
 	}
 }
