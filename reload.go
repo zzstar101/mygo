@@ -240,11 +240,22 @@ func reloadedWindow(w *Window, opts *WindowOptions, st reloadWindowState) {
 		return
 	}
 	opts.Hidden = true
-	focused := st.Focused
-	w.OnReadyToShow(func() {
+	focused, shown := st.Focused, false
+	show := func() {
+		if shown {
+			return
+		}
+		shown = true
 		w.Show()
 		if focused {
 			w.Focus()
 		}
-	})
+	}
+	w.OnReadyToShow(show)
+	if w.content == nil {
+		// A page that fails to load is never ready to show: the window
+		// shows the failure, as it would have without the reload, rather
+		// than staying hidden with nothing to tell why.
+		w.onDidFailLoad.add(func(*LoadError) { show() }, false)
+	}
 }

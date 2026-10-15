@@ -508,6 +508,31 @@ func TestReloadHiddenWindowStaysHidden(t *testing.T) {
 	onMain(finishReloadRestore)
 }
 
+// TestReloadShowsAWindowWhosePageFailed checks that a window the reload
+// holds back until it is ready is shown when its page fails to load, which
+// never makes it ready: the reload does not leave the app without a window.
+func TestReloadShowsAWindowWhosePageFailed(t *testing.T) {
+	payload := reloadPayload{Windows: []reloadWindowState{
+		{StateKey: "reload-failed-page", Width: 400, Height: 300, Visible: true},
+	}}
+	t.Cleanup(func() {
+		onMain(func() { devReload.pulled, devReload.doing, devReload.claimed = nil, false, nil })
+	})
+	onMain(func() {
+		devReload.pulled = &payload
+		startReloadRestore()
+	})
+	w, fw := testWindow(t, WindowOptions{StateKey: "reload-failed-page", URL: "http://localhost:1/"})
+	onMain(finishReloadRestore)
+	if fw.IsVisible() {
+		t.Fatal("the window was shown before its page was ready")
+	}
+	onMain(func() { (&windowHandler{w}).LoadFailed("http://localhost:1/", -1, "refused") })
+	if !fw.IsVisible() {
+		t.Error("the window whose page failed to load stayed hidden")
+	}
+}
+
 // TestReloadRelaunchSavesBeforeTheWindowsClose checks that App.Relaunch
 // hands the state over while the windows are still there: the quit
 // sequence closes them, and what they were cannot be read after that.
