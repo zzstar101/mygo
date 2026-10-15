@@ -571,6 +571,71 @@ func TestReloadRelaunchSavesBeforeTheWindowsClose(t *testing.T) {
 	}
 }
 
+// TestReloadRelaunchCancelledSavesAgain checks that a relaunch a window
+// cancels leaves the app answering mygo dev: the state it handed over as the
+// quit began goes nowhere, and the next reload asks for it again.
+func TestReloadRelaunchCancelledSavesAgain(t *testing.T) {
+	app, dev := net.Pipe()
+	defer dev.Close()
+	t.Cleanup(func() {
+		onMain(func() {
+			stopDevReload()
+			devReload.saved, devReload.pulled, devReload.doing, devReload.claimed = false, nil, false, nil
+			App.quitting, App.relaunch = false, false
+		})
+		App.OnReload(ReloadHandlers{})
+	})
+	onMain(func() { devReload.conn, devReload.saved = app, false })
+	count := 0
+	App.OnReload(ReloadHandlers{Save: func(s *ReloadState) error { count++; return s.Set("count", count) }})
+	w, _ := testWindow(t, WindowOptions{StateKey: "reload-relaunch-cancelled"})
+	off := w.OnClose(func(e *CloseEvent) { e.PreventDefault() })
+	defer off()
+
+	read := make(chan reloadMessage, 2)
+	go func() {
+		defer close(read)
+		r := bufio.NewReader(dev)
+		for {
+			line, err := r.ReadBytes('\n')
+			if err != nil {
+				return
+			}
+			var msg reloadMessage
+			if json.Unmarshal(line, &msg) == nil {
+				read <- msg
+			}
+		}
+	}()
+	next := func(what string) reloadMessage {
+		t.Helper()
+		select {
+		case msg := <-read:
+			return msg
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the app did not hand its state over %s", what)
+			return reloadMessage{}
+		}
+	}
+
+	// The window cancels the relaunch, after the app handed its state over.
+	App.Relaunch()
+	next("as the relaunch began")
+	if onMainValue(func() bool { return App.relaunch || App.quitting }) {
+		t.Fatal("the relaunch went on")
+	}
+	// mygo dev rebuilds: the app that went on answers.
+	onMain(saveDevReload)
+	msg := next("when mygo dev asked after a cancelled relaunch")
+	var payload reloadPayload
+	if err := json.Unmarshal(msg.State, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if string(payload.Values["count"]) != "2" {
+		t.Errorf("the app handed count=%s, want the state of a second Save", payload.Values["count"])
+	}
+}
+
 // TestReloadRestoreFailureStartsFresh checks that a reload whose Restore
 // fails still starts the app: the handover is best-effort, and a build
 // that cannot take the state of the one before it starts with its own.

@@ -96,6 +96,10 @@ func (a *Application) Relaunch() {
 			a.stopLoop()
 		} else {
 			a.relaunch = false
+			// The state handed over as the quit began goes nowhere: the
+			// app goes on, and hands its state over again when mygo dev
+			// next asks for it.
+			devReload.saved = false
 		}
 	})
 }
