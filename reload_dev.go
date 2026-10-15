@@ -1,4 +1,4 @@
-//go:build !js
+//go:build !js && !mygo_noinspector
 
 package mygo
 
@@ -16,6 +16,10 @@ import (
 
 // reloadConn is the app's connection to mygo dev.
 type reloadConn = net.Conn
+
+// devReloadable tells whether this build can hand its state over at all:
+// a production build (reload_off.go) leaves it out.
+const devReloadable = true
 
 // startDevReload connects to mygo dev, unless this build was not launched
 // with state handover: no MYGO_DEV_SOCKET (a production build, another

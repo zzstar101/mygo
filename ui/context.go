@@ -242,7 +242,7 @@ func (c *context) newElement(k kind) *node {
 	e.kind = k
 	p := c.parent
 	e.id = mix(p.id, uint64(p.nchild)+uint64(k)<<56)
-	if c.rt.reload {
+	if reloadable && c.rt.reload {
 		// The same name in the next build of the same view (reload.go).
 		e.reloadID = mix(p.reloadID, uint64(p.nchild)+uint64(k)<<56)
 	}
@@ -250,7 +250,7 @@ func (c *context) newElement(k kind) *node {
 	keyed := c.keySet
 	if c.keySet {
 		e.id = keyedID(p.id, c.nextKey)
-		if c.rt.reload {
+		if reloadable && c.rt.reload {
 			e.reloadID = mix(p.reloadID, reloadKey(c.nextKey))
 		}
 		e.key = c.nextKey
@@ -283,7 +283,7 @@ func (c *context) rekey(e *node, k any) {
 	if id != e.id {
 		rt.unlook(e.st)
 	}
-	if rt.reload {
+	if reloadable && rt.reload {
 		reloadParent := uint64(0)
 		if e.parent != nil {
 			reloadParent = e.parent.reloadID

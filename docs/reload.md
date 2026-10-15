@@ -142,4 +142,5 @@ is this in an app: a note and a counter that survive the reload.
 this one did: the app is handed nothing, the handlers do not run, and what
 package ui keeps is dropped. It is a development flag, like every flag of
 `mygo dev`; `mygo build` marks its builds production, and the app it ships
-never looks for a dev channel at all.
+never looks for a dev channel at all: like the inspector of native UI, the
+handover is left out of its binary.

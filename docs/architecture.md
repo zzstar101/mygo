@@ -5298,8 +5298,11 @@ renderer's (`gputest.Compare`).
     `App.Relaunch` takes the same road the other way round: the app hands
     its state over as its quit sequence begins, before it closes the
     windows the state holds, and exits with code 75, and the build that
-    starts next gets it (`reload_dev.go`; `reload_browser.go` keeps the
-    browser builds, where the page reloads itself, out of it).
+    starts next gets it (`reload_dev.go`; `reload_off.go` keeps the
+    browser builds, where the page reloads itself, out of it, and the
+    production builds of the tag `mygo_noinspector`, as `ui/reload_off.go`
+    does for package ui, so that apps never run by `mygo dev` do not carry
+    it).
     What the app keeps of a window is its place, whether it was showing and
     whether it had the focus, applied before the window is created, and the
     window is held back until it drew the restored state (`reloadedWindow`),

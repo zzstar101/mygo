@@ -1,3 +1,5 @@
+//go:build !mygo_noinspector
+
 package ui
 
 import (

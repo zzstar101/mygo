@@ -165,7 +165,7 @@ const devSocketEnv = "MYGO_DEV_SOCKET"
 // mygo dev run has a channel, and runs Restore with nothing set, so an app
 // can tell by Keys that it is starting fresh.
 func startReloadRestore() {
-	if devReload.conn == nil && devReload.pulled == nil {
+	if !devReloadable || devReload.conn == nil && devReload.pulled == nil {
 		return
 	}
 	p := devReload.pulled
@@ -200,7 +200,7 @@ func finishReloadRestore() {
 // fall back on. A window the reload has no state for starts fresh: it is
 // not worth putting a state of some other window on it.
 func reloadWindowFor(stateKey string, isWindow bool) (reloadWindowState, bool) {
-	if !devReload.doing || !isWindow {
+	if !devReloadable || !devReload.doing || !isWindow {
 		return reloadWindowState{}, false
 	}
 	p := devReload.pulled

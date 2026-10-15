@@ -111,7 +111,7 @@ func (rt *engine) reloadRestore(data []byte) {
 // build of the same view finds it again, and applies what the build before
 // this one kept of it.
 func (rt *engine) reloadBorn(e *node) {
-	if !rt.reload || e.st.born != rt.frame {
+	if !reloadable || !rt.reload || e.st.born != rt.frame {
 		return
 	}
 	e.st.reloadID = e.reloadID
