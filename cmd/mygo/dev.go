@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/egoist/mygo/internal/hotlink"
 )
 
 func runDev(args []string) error {
@@ -61,6 +63,7 @@ keep it: the app's own setting is left as it is.`)
 	port := flags.Int("port", 5174, "with -web, the port to serve the app at, or the next free one")
 	openPage := flags.Bool("open", true, "with -web, open the app in the browser")
 	lang := flags.String("lang", "", "run the app in this language (as de, or the pseudo locales en-XA and ar-XB), without keeping it")
+	noHot := flags.Bool("no-hot", false, "restart the app on every change, instead of changing its code as it runs")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -82,6 +85,9 @@ keep it: the app's own setting is left as it is.`)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	s := &devSession{root: c.root, sign: devSign(c, *sign), name: devConfig(c).Name, env: []string{"MYGO_ENV=development"}}
+	if !*noHot {
+		s.hotBuild = newHotBuild(c)
+	}
 	if locale != "" {
 		// The app reads it as it starts, over the language it keeps.
 		s.env = append(s.env, "MYGO_LOCALE="+locale)
@@ -229,6 +235,11 @@ type devSession struct {
 	app *devProcess // the running build
 	sum [32]byte    // fingerprint of the running build
 
+	// hotBuild is how to build apps to patch, nil to only ever restart them.
+	hotBuild *hotBuild
+	// hot, used by one build or patch at a time, is that of the running build.
+	hot *hotReloader
+
 	// live is app, which a build stops before it starts.
 	liveMu sync.Mutex
 	live   *devProcess
@@ -278,6 +289,7 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 		sum    [32]byte
 		err    error
 		inputs *buildInputs
+		hot    bool // a patch of the running app: there is no new process
 	}
 	results := make(chan result, 1)
 	builds, cancel := context.WithCancel(ctx)
@@ -299,9 +311,37 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 		if len(changed) > 0 {
 			why = "(" + changeSummary(s.root, changed) + ")"
 		}
+		// A save goes into the running app when it can.
+		hot := s.hot
+		edits := changed
+		if restart || !launched || len(changed) == 0 || !s.liveRunning() {
+			hot = nil
+		}
 		building, pending, restart, changed = true, false, false, nil
-		t := con.start(strings.TrimSpace(title + s.name + " " + why))
+		var t *task
+		if hot != nil {
+			t = con.start(strings.TrimSpace("Reloading " + why))
+		} else {
+			t = con.start(strings.TrimSpace(title + s.name + " " + why))
+		}
 		go func() {
+			if hot != nil {
+				res, err := hot.apply(builds, edits)
+				var refusal *hotlink.Refusal
+				switch {
+				case err == nil:
+					t.done(hotSummary(why, res))
+					results <- result{hot: true}
+					return
+				case errors.As(err, &refusal):
+					t.set(refusal.Reason)
+					logf("Restarting: %s", refusal.Reason)
+				default:
+					s.report(t, verb, why, err)
+					results <- result{hot: true, err: err}
+					return
+				}
+			}
 			p, sum, err := s.buildAndLaunch(builds, t, running)
 			s.report(t, verb, why, err)
 			// What the build reads may have changed, e.g. a new import.
@@ -309,7 +349,7 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 			if c, cerr := loadConfig(s.root); cerr == nil {
 				inputs, _ = listBuildInputs(c)
 			}
-			results <- result{p, sum, err, inputs}
+			results <- result{p: p, sum: sum, err: err, inputs: inputs}
 		}()
 	}
 	var stopping sync.WaitGroup
@@ -352,6 +392,12 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 			s.setApp(nil)
 			var exit *exec.ExitError
 			if errors.As(err, &exit) && exit.ExitCode() == devRelaunchCode {
+				if s.hot != nil && s.hot.patched {
+					// The build on disk is older than the app that quit.
+					restart = true
+					start()
+					continue
+				}
 				// mygo.App.Relaunch: start the same build again.
 				p, err := s.launch(exe)
 				if err != nil {
@@ -403,6 +449,16 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 			}
 		case r := <-results:
 			building = false
+			if r.hot {
+				if r.err == nil {
+					// The running build is not what any file on disk is.
+					s.sum = [32]byte{}
+				}
+				if pending {
+					start()
+				}
+				continue
+			}
 			if r.inputs != nil {
 				w.set(r.inputs)
 				if !importChecked && r.err == nil {
@@ -438,6 +494,18 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 			}
 		}
 	}
+}
+
+// hotSummary says what a patch did.
+func hotSummary(why string, res *hotResult) string {
+	if len(res.functions) == 0 {
+		return dim("No change to the app") + " " + dim(why)
+	}
+	n := fmt.Sprintf("%d functions", len(res.functions))
+	if len(res.functions) == 1 {
+		n = strings.TrimPrefix(res.functions[0], "main.")
+	}
+	return "Reloaded " + n + " " + dim(why)
 }
 
 // report ends the step t of a build with how it went, and why it ran.
@@ -581,7 +649,11 @@ func (s *devSession) buildAndLaunch(ctx context.Context, t *task, running [32]by
 		cleanup()
 		return nil, sum, err
 	}
-	err = goBuild(ctx, c, t, bin, nil, "-ldflags", strings.TrimSpace(packageFlags(dc)))
+	flags := []string{"-ldflags", strings.TrimSpace(packageFlags(dc))}
+	if s.hotBuild != nil {
+		flags = append(flags, s.hotBuild.flags...)
+	}
+	err = goBuild(ctx, c, t, bin, nil, flags...)
 	cleanup()
 	if err != nil {
 		return nil, sum, err
@@ -773,6 +845,13 @@ func (s *devSession) icon(c *Config) ([]byte, error) {
 // launch starts a build. MYGO_DEV=1 tells it that mygo dev runs it, which
 // mygo.App.Relaunch asks to start it again.
 func (s *devSession) launch(exe string) (*devProcess, error) {
+	var hot *hotReloader
+	if s.hotBuild != nil {
+		var err error
+		if hot, err = newHotReloader(); err != nil {
+			warnf("Hot reload: %v", err)
+		}
+	}
 	stdout, outDone, err := pipe(con.output("app", os.Stdout))
 	if err != nil {
 		return nil, err
@@ -786,12 +865,29 @@ func (s *devSession) launch(exe string) (*devProcess, error) {
 	cmd.Dir = s.root
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.Env = append(append(os.Environ(), s.env...), "MYGO_DEV=1")
+	if hot != nil {
+		cmd.Env = append(cmd.Env, "MYGO_HOT="+hot.addr())
+	}
 	setProcessGroup(cmd)
 	err = cmd.Start()
 	stdout.Close()
 	stderr.Close()
 	if err != nil {
+		if hot != nil {
+			hot.close()
+		}
 		return nil, err
+	}
+	if s.hot != nil {
+		s.hot.close()
+	}
+	s.hot = hot
+	if hot != nil {
+		c, err := loadConfig(s.root)
+		if err != nil {
+			return nil, err
+		}
+		hot.start(c, s.hotBuild, exe)
 	}
 	p := &devProcess{exe: exe, cmd: cmd, done: make(chan struct{})}
 	go func() {

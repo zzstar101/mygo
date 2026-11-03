@@ -1,0 +1,217 @@
+package main
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
+	"reflect"
+	"runtime"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/egoist/mygo/internal/hotlink/testdata/host/lib"
+	"github.com/egoist/mygo/internal/hotpatch"
+)
+
+type point struct{ x, y int }
+
+func (p *point) sum() int { return p.x + p.y + bonus() }
+
+var (
+	calls    int
+	limit    = 20
+	state    = map[string]int{"kept": 42}
+	sentinel = errors.New("the host's error")
+	held     func() string
+	work     = make(chan func() string, 1)
+)
+
+// A variable the running program does not have, holding pointers.
+var added = []*shape{{name: "added"}}
+
+//go:noinline
+func bonus() int { return 100 }
+
+//go:noinline
+func message() string { return "v2 " + describe(circle{r: 2}) }
+
+// A new type, with a new interface and methods.
+type shaper interface {
+	area() float64
+	label() string
+}
+
+type shape struct {
+	name string
+	next *shape
+}
+
+type circle struct{ r float64 }
+
+func (c circle) area() float64 { return 3 * c.r * c.r }
+func (c circle) label() string { return "circle" }
+
+func describe(s shaper) string { return fmt.Sprintf("%s=%.0f (%T)", s.label(), s.area(), s) }
+
+func mapOf[K comparable, V any](ks []K, f func(K) V) map[K]V {
+	m := make(map[K]V, len(ks))
+	for _, k := range ks {
+		m[k] = f(k)
+	}
+	return m
+}
+
+//go:noinline
+func deep(n int) int {
+	var pad [256]byte
+	pad[n%256] = byte(n)
+	if n == 0 {
+		return int(pad[0])
+	}
+	return deep(n-1) + int(pad[n%256])&1
+}
+
+//go:noinline
+func catches() (out string) {
+	defer func() {
+		r := recover()
+		_, file, line, _ := runtime.Caller(0)
+		out = fmt.Sprintf("recovered %v at %s:%d", r, file[strings.LastIndexByte(file, '/')+1:], line)
+	}()
+	var m map[string]int
+	m["boom"] = 1
+	return "not reached"
+}
+
+//go:noinline
+func stress() string {
+	var out []string
+	add := func(format string, args ...any) { out = append(out, fmt.Sprintf(format, args...)) }
+
+	// Allocation, with pointers that only this code's stack maps describe.
+	nodes := []*shape{}
+	for i := range 20000 {
+		nodes = append(nodes, &shape{name: fmt.Sprint(i)})
+	}
+	runtime.GC()
+	sum := 0
+	for _, n := range nodes {
+		sum += len(n.name)
+	}
+	add("alloc %d", sum)
+
+	// The stack grows through this code, and shrinks in a collection.
+	add("deep %d", deep(20000))
+	runtime.GC()
+
+	// Panics unwind through it, and its frames have names and lines.
+	add("%s", catches())
+	pc, _, _, _ := runtime.Caller(0)
+	add("self %s", runtime.FuncForPC(pc).Name())
+
+	// Generics, instantiated here and not in the program.
+	m := mapOf([]string{"a", "bb"}, func(s string) int { return len(s) })
+	add("generic %d %d", m["a"], m["bb"])
+
+	// Goroutines and channels.
+	var wg sync.WaitGroup
+	ch := make(chan int, 8)
+	for i := range 8 {
+		wg.Add(1)
+		go func() { defer wg.Done(); runtime.Gosched(); ch <- deep(1000) + i }()
+	}
+	wg.Wait()
+	close(ch)
+	total := 0
+	for v := range ch {
+		total += v
+	}
+	add("goroutines %d", total)
+
+	// Identity of what the program has: its errors, its types.
+	err := fmt.Errorf("wrapped: %w", sentinel)
+	add("errors.Is %v", errors.Is(err, sentinel))
+	var e error = sentinel
+	add("same error %v", e == sentinel)
+	add("kept type %v", reflect.TypeOf(&point{}) == reflect.TypeOf(heldPoint()))
+	add("switch %s", classify(any(&point{})))
+
+	// Reflection over a new type.
+	rt := reflect.TypeOf(circle{})
+	add("reflect %s %d %v %v", rt.Name(), rt.NumField(), rt.Size(), added[0].name)
+	return strings.Join(out, "\n") + "\n" + useLater()
+}
+
+func classify(v any) string {
+	switch v.(type) {
+	case *point:
+		return "*point"
+	case circle:
+		return "circle"
+	}
+	return "other"
+}
+
+// useLater reaches packages and functions the program's linker dropped.
+func useLater() string {
+	s := []string{"b", "a"}
+	slices.Sort(s)
+	_ = time.Duration(0).String()
+	return "dropped " + strings.Join(s, " ") + " " + strings.ToTitle("x") + strings.Repeat("y", 2) + " " + time.Unix(0, 0).UTC().Weekday().String()
+}
+
+func heldPoint() any { return &point{} }
+
+func main() {
+	addr := os.Getenv("MYGO_HOT")
+	var ready sync.WaitGroup
+	ready.Add(1)
+	if addr != "" {
+		go func() {
+			err := hotpatch.Serve(addr, func(f func()) {
+				done := make(chan struct{})
+				work <- func() string { f(); close(done); return "" }
+				<-done
+			}, func() { fmt.Println("applied") })
+			if err != nil {
+				fmt.Println("serve:", err)
+			}
+		}()
+	}
+	lines := make(chan string)
+	go func() {
+		sc := bufio.NewScanner(os.Stdin)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+		close(lines)
+	}()
+	held = func() string { return "the old closure " + message() }
+	for {
+		select {
+		case f := <-work:
+			f()
+		case line, ok := <-lines:
+			if !ok {
+				return
+			}
+			calls++
+			switch line {
+			case "message":
+				fmt.Println(message())
+			case "lib":
+				fmt.Println(lib.Name(), lib.Version)
+			case "stress":
+				fmt.Println(stress())
+			case "held":
+				fmt.Println(held())
+			case "state":
+				p := &point{x: 1, y: 2}
+				fmt.Println(calls, limit, state["kept"], p.sum())
+			}
+		}
+	}
+}

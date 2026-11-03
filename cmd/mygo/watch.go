@@ -139,8 +139,33 @@ func goEnv(key string) string {
 	return v
 }
 
-// watcher detects changes to the build inputs by polling. Stat'ing a few
-// hundred files a few times a second is cheap and needs no platform APIs.
+// settleAfter is how long the inputs stay unchanged before a change that the
+// system told of counts, so that a save in several writes is one change.
+const settleAfter = 15 * time.Millisecond
+
+// notifier wakes the watcher as soon as the system says something changed. A
+// notice only says when to look: snapshots tell what changed, and polling finds
+// what notices miss.
+type notifier interface {
+	// sync makes the paths the ones watched; changed are those that may be
+	// other files than before.
+	sync(paths, changed []string)
+}
+
+type noNotifier struct{}
+
+func (noNotifier) sync(_, _ []string) {}
+
+func wakeUp(wake chan<- struct{}) {
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+// watcher detects changes to the build inputs by polling, and looks at once
+// when the system tells of a change. Stat'ing a few hundred files a few times a
+// second is cheap and needs no platform APIs.
 type watcher struct {
 	mu     sync.Mutex
 	inputs *buildInputs
@@ -155,6 +180,18 @@ func (w *watcher) set(in *buildInputs) {
 		w.inputs, w.reset = in, true
 	}
 	w.mu.Unlock()
+}
+
+// notified returns the paths for the system to watch: the inputs a snapshot
+// found, and their directories, where new ones appear.
+func (in *buildInputs) notified(snap map[string]string) []string {
+	paths := make([]string, 0, len(snap)+len(in.sourceDirs)+len(in.fileDirs))
+	paths = append(paths, in.sourceDirs...)
+	paths = append(paths, in.fileDirs...)
+	for p := range snap {
+		paths = append(paths, p)
+	}
+	return paths
 }
 
 func (in *buildInputs) equal(o *buildInputs) bool {
@@ -270,11 +307,19 @@ func (w *watcher) watch(ctx context.Context, interval time.Duration) <-chan []st
 		settling := false
 		tick := time.NewTicker(interval)
 		defer tick.Stop()
+		wake := make(chan struct{}, 1)
+		notices := newNotifier(wake)
+		var settle <-chan time.Time
 		for {
+			woken := false
 			select {
 			case <-ctx.Done():
 				return
 			case <-tick.C:
+			case <-wake:
+				woken = true
+			case <-settle:
+				settle = nil
 			}
 			w.mu.Lock()
 			in, reset := w.inputs, w.reset
@@ -288,18 +333,27 @@ func (w *watcher) watch(ctx context.Context, interval time.Duration) <-chan []st
 			case reset:
 				last, settling = cur, false
 				clear(changed)
+				settle = nil
+				notices.sync(in.notified(cur), nil)
 			case !maps.Equal(cur, last):
+				var moved []string
 				for p, v := range cur {
 					if last[p] != v {
 						changed[p] = true
+						moved = append(moved, p)
 					}
 				}
 				for p := range last {
 					if _, ok := cur[p]; !ok {
 						changed[p] = true
+						moved = append(moved, p)
 					}
 				}
 				last, settling = cur, true
+				settle = time.After(settleAfter)
+				notices.sync(in.notified(cur), moved)
+			case woken && settling:
+				// Another notice of what it saw: it settles by the timer.
 			case settling:
 				settling = false
 				// Along with those not taken yet.
