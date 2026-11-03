@@ -50,6 +50,13 @@ type Session struct {
 
 	defs map[string]symLoc // every symbol defined, by key; built on the first need
 
+	// QueryItab asks the running program for an itab of its own, or 0. Conversions
+	// make itabs as they run, which nothing else knows of.
+	QueryItab func(inter, typ uint64) (uint64, error)
+
+	inCode map[string]uint64 // what typeInCode found, or 0 for nothing
+	refs   map[*object]map[uint32][]reference
+
 	latest map[string]uint64   // where patches put symbols, by key
 	copies map[string][]uint64 // every copy of a function, by key, each of which must jump to the newest
 }
@@ -85,6 +92,165 @@ func NewSession(exe, goos, goarch string, archives map[string]string) (*Session,
 	return s, nil
 }
 
+// typeInCode finds a type descriptor the walk of descriptors could not reach:
+// one that only code refers to, as a type converted to any and nothing else.
+// The objects say which instructions refer to it, and the executable holds them
+// with the address filled in. It returns a link-time address.
+func (s *Session) typeInCode(key typeKey, sym string) (uint64, bool) {
+	if a, ok := s.inCode[sym]; ok {
+		return a, a != 0
+	}
+	if s.inCode == nil {
+		s.inCode = map[string]uint64{}
+	}
+	var found uint64
+	for _, objs := range s.running {
+		for _, o := range objs {
+			if found = s.typeInObject(o, key, sym); found != 0 {
+				break
+			}
+		}
+		if found != 0 {
+			break
+		}
+	}
+	s.inCode[sym] = found
+	return found, found != 0
+}
+
+func (s *Session) typeInObject(o *object, key typeKey, sym string) uint64 {
+	// Only an object that uses the type has it.
+	var idx uint32
+	has := false
+	for _, i := range o.indexes() {
+		if name := o.symName(i); isTypeDesc(name) && symKey(name, o.symABI(i)) == sym {
+			idx, has = i, true
+			break
+		}
+	}
+	if !has {
+		return 0
+	}
+	check := func(a uint64) bool {
+		if a < s.host.typesAt || a >= s.host.etypes {
+			return false
+		}
+		// It must be what was asked: an edit may have reused the name.
+		d := s.host.read(a, typeHeader)
+		return d != nil && binary.LittleEndian.Uint32(d[typeHash:]) == key.hash && s.host.typeString(s.host.typesAt, d) == key.str
+	}
+	if a := s.locate(o, idx, check, 2); a != 0 {
+		s.host.walkTypes([]uint64{a})
+		return a
+	}
+	return 0
+}
+
+// reference is a relocation of symbol from.
+type reference struct {
+	from uint32
+	r    reloc
+}
+
+// references returns what refers to each symbol the object defines.
+func (s *Session) references(o *object) map[uint32][]reference {
+	if refs, ok := s.refs[o]; ok {
+		return refs
+	}
+	refs := map[uint32][]reference{}
+	for _, i := range o.indexes() {
+		switch o.symKind(i) {
+		case kindText, kindTextFIPS, kindData, kindDataFIPS, kindNoptrData, kindNoptrDataFIPS, kindRodata, kindRodataFIPS:
+		default:
+			continue
+		}
+		for j := range o.nreloc(i) {
+			r := o.reloc(i, j)
+			if r.sym.pkg == pkgIdxInvalid || isMarker(r.typ) {
+				continue
+			}
+			t, err := s.resolveRunning(o, r.sym)
+			if err == nil && t.o == o {
+				refs[t.i] = append(refs[t.i], reference{i, r})
+			}
+		}
+	}
+	if s.refs == nil {
+		s.refs = map[*object]map[uint32][]reference{}
+	}
+	s.refs[o] = refs
+	return refs
+}
+
+// locate finds where the executable has a symbol the symbol table leaves out,
+// by what refers to it there. Something may only refer to it through another
+// such symbol, as code does to what a type assertion's data names; depth is how
+// many of those to go through.
+func (s *Session) locate(o *object, idx uint32, check func(uint64) bool, depth int) uint64 {
+	for _, ref := range s.references(o)[idx] {
+		var at uint64
+		if o.symABI(ref.from) != abiStatic {
+			at = s.host.syms[o.symName(ref.from)]
+		}
+		if at == 0 && depth > 0 {
+			at = s.locate(o, ref.from, func(a uint64) bool {
+				return s.host.read(a, int(o.symSize(ref.from))) != nil
+			}, depth-1)
+		}
+		if at == 0 {
+			continue
+		}
+		code := s.host.read(at, int(o.symSize(ref.from)))
+		if code == nil {
+			continue
+		}
+		if a, ok := decodeReference(s.arch, code, at, ref.r); ok && check(a) {
+			return a
+		}
+	}
+	return 0
+}
+
+// decodeReference reads back the address a relocation put in linked code.
+func decodeReference(arch string, code []byte, at uint64, r reloc) (uint64, bool) {
+	off := int(r.off)
+	if off < 0 || off+int(r.siz) > len(code) {
+		return 0, false
+	}
+	pc := at + uint64(off)
+	le := binary.LittleEndian
+	switch r.typ {
+	case rADDR:
+		if r.siz != 8 {
+			return 0, false
+		}
+		return uint64(int64(le.Uint64(code[off:])) - r.add), true
+	case rADDRARM64:
+		if off+8 > len(code) {
+			return 0, false
+		}
+		o0, o1 := le.Uint32(code[off:]), le.Uint32(code[off+4:])
+		lo := int64((o0 >> 29) & 3)
+		hi := int64(int32(o0<<8) >> 13) // the signed 19 bits at 5
+		page := int64(pc&^0xfff) + (hi<<2|lo)<<12
+		return uint64(page + int64((o1>>10)&0xfff) - r.add), true
+	case rPCREL:
+		if r.siz != 4 {
+			return 0, false
+		}
+		d := int64(int32(le.Uint32(code[off:])))
+		return uint64(int64(pc) + int64(r.siz) + d - r.add), true
+	}
+	return 0, false
+}
+
+// CanPatch reports whether the program can connect at all: a module of MyGo
+// older than the CLI ignores the build tag.
+func (s *Session) CanPatch() bool {
+	_, ok := s.host.syms["github.com/egoist/mygo/internal/hotpatch.Probe"]
+	return ok
+}
+
 // Attach takes what the running program said as it connected, and returns
 // the memory in its image that it should set aside for patches.
 func (s *Session) Attach(hello hotpatch.Hello) (hotpatch.Reserve, error) {
@@ -102,6 +268,18 @@ func (s *Session) Attach(hello hotpatch.Hello) (hotpatch.Reserve, error) {
 		At:    rnd(region+s.slide, pageSize),
 		Limit: (region + s.slide + hotpatch.RegionSize) &^ (pageSize - 1),
 	}, nil
+}
+
+// UseClient has the session ask the running program what only it knows.
+func (s *Session) UseClient(c *hotpatch.Client) {
+	table, ok := s.host.syms["runtime.itabTable"]
+	if !ok {
+		return
+	}
+	s.QueryItab = func(inter, typ uint64) (uint64, error) {
+		reply, err := c.Do(hotpatch.Request{Itab: &hotpatch.ItabQuery{Inter: inter, Type: typ, Table: table + s.slide}})
+		return reply.Itab, err
+	}
 }
 
 // Reserved takes the memory the program set aside.
@@ -178,7 +356,7 @@ func (s *Session) target(o *object, i uint32) target {
 	name, abi := o.symName(i), o.symABI(i)
 	t := target{o: o, i: i, name: name, abi: abi}
 	switch {
-	case o.symHash(i) != "" && !isText(o.symKind(i)):
+	case !hasIdentity(o, i):
 		t.key = "#" + o.symHash(i)
 	case abi == abiStatic:
 		t.key = fmt.Sprintf("s%p:%d", o, i)
@@ -189,6 +367,16 @@ func (s *Session) target(o *object, i uint32) target {
 		}
 	}
 	return t
+}
+
+// hasIdentity reports whether a symbol is what its name says, rather than any
+// bytes alike. The compiler marks functions, itabs and types content addressed
+// too, for the linker to merge copies, but one program has one of each of those.
+func hasIdentity(o *object, i uint32) bool {
+	if o.symHash(i) == "" || isText(o.symKind(i)) || o.symFlag2(i)&symFlag2Itab != 0 {
+		return true
+	}
+	return isTypeDesc(o.symName(i))
 }
 
 func isText(kind uint8) bool { return kind == kindText || kind == kindTextFIPS }
@@ -215,7 +403,7 @@ func (s *Session) def(t target) (target, bool) {
 
 func (s *Session) indexObject(o *object) {
 	for _, i := range o.indexes() {
-		if abi := o.symABI(i); abi != abiStatic && (o.symHash(i) == "" || isText(o.symKind(i))) {
+		if abi := o.symABI(i); abi != abiStatic && hasIdentity(o, i) {
 			key := symKey(o.symName(i), abi)
 			// The newest definition wins; a function's body beats a stub.
 			if l, ok := s.defs[key]; !ok || (o.symSize(i) > 0 && l.o.symSize(l.i) == 0) || l.o.pkg == o.pkg {
@@ -323,7 +511,7 @@ func (f *fingerprints) of(i uint32) [32]byte {
 // owned reports whether t belongs to the symbol named owner: its closures,
 // and the data only it refers to.
 func (f *fingerprints) owned(owner string, t target) bool {
-	if t.abi == abiStatic {
+	if t.abi == abiStatic || isNumbered(t.name) {
 		return true
 	}
 	return strings.HasPrefix(t.name, owner+".") || strings.HasPrefix(t.name, owner+"·")
@@ -377,7 +565,7 @@ type change struct {
 func (s *Session) diff(old, cur *object) (*change, error) {
 	oldIdx := map[string]uint32{}
 	for _, i := range old.indexes() {
-		if (old.symHash(i) == "" || isText(old.symKind(i))) && old.symABI(i) != abiStatic {
+		if hasIdentity(old, i) && old.symABI(i) != abiStatic {
 			oldIdx[symKey(old.symName(i), old.symABI(i))] = i
 		}
 	}
@@ -397,7 +585,7 @@ func (s *Session) diff(old, cur *object) (*change, error) {
 	for _, i := range cur.indexes() {
 		name, kind := cur.symName(i), cur.symKind(i)
 		// A symbol without a name is part of another: its metadata.
-		if name == "" || (cur.symHash(i) != "" && !isText(kind)) || cur.symABI(i) == abiStatic {
+		if name == "" || !hasIdentity(cur, i) || cur.symABI(i) == abiStatic || isNumbered(name) {
 			continue
 		}
 		key := symKey(name, cur.symABI(i))

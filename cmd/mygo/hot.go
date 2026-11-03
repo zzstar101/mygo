@@ -57,11 +57,16 @@ func hotModules(c *Config) []string {
 	return strings.Fields(out.String())
 }
 
+// hotConnectGrace is how long a save waits for a reloader still getting ready.
+const hotConnectGrace = 10 * time.Second
+
 // hotReloader connects mygo dev with one running build.
 type hotReloader struct {
 	dir      string // holds the socket and compiled packages
 	listener net.Listener
 	exe      string
+	inputs   *buildInputs
+	stamp    map[string]string
 
 	mu      sync.Mutex
 	ready   chan struct{} // closed when the session is ready, or failed
@@ -72,6 +77,7 @@ type hotReloader struct {
 	conn    net.Conn
 	enc     *gob.Encoder
 	dec     *gob.Decoder
+	client  *hotpatch.Client
 	patched bool
 }
 
@@ -101,11 +107,12 @@ func (h *hotReloader) close() {
 	os.RemoveAll(h.dir)
 }
 
-// start readies the reloader for the build at exe: it reads what the build was
-// linked from, and takes the connection the app makes as it starts. Both take a
-// moment that should not delay the app.
-func (h *hotReloader) start(c *Config, b *hotBuild, exe string) {
-	h.exe = exe
+// start readies the reloader for the build at exe, whose inputs looked like
+// stamp as it began: it reads what the build was linked from, and takes the
+// connection the app makes as it starts. Both take a moment that should not
+// delay the app.
+func (h *hotReloader) start(c *Config, b *hotBuild, exe string, inputs *buildInputs, stamp map[string]string) {
+	h.exe, h.inputs, h.stamp = exe, inputs, stamp
 	go func() {
 		defer close(h.ready)
 		h.err = h.connect(c, b)
@@ -136,6 +143,15 @@ func (h *hotReloader) connect(c *Config, b *hotBuild) error {
 	s, err := hotlink.NewSession(h.exe, runtime.GOOS, runtime.GOARCH, archives)
 	if err != nil {
 		return err
+	}
+	// A module of MyGo older than this CLI has no hot reload to connect.
+	if !s.CanPatch() {
+		return errors.New("this version of MyGo has no hot reload")
+	}
+	// What go list compiled must be what the running build was: a save during
+	// the build is in the archives and not in the app.
+	if h.stamp != nil && !maps.Equal(snapshot(h.inputs), h.stamp) {
+		return errors.New("the code changed while it built")
 	}
 	version, err := hotlink.HostGoVersion(c.root, env)
 	if err != nil {
@@ -172,6 +188,8 @@ func (h *hotReloader) connect(c *Config, b *hotBuild) error {
 		return errors.New(reserved.Err)
 	}
 	s.Reserved(reserved.At, reserved.Size)
+	h.client = &hotpatch.Client{Enc: h.enc, Dec: h.dec}
+	s.UseClient(h.client)
 	return nil
 }
 
@@ -190,6 +208,9 @@ func (h *hotReloader) apply(ctx context.Context, changed []string) (*hotResult, 
 	case <-h.ready:
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-time.After(hotConnectGrace):
+		// An app that never connected, as one stuck before main.
+		return nil, &hotlink.Refusal{Reason: "the app did not connect"}
 	}
 	if h.err != nil {
 		return nil, &hotlink.Refusal{Reason: h.err.Error()}
@@ -228,11 +249,8 @@ func (h *hotReloader) apply(ctx context.Context, changed []string) (*hotResult, 
 	if patch == nil {
 		return &hotResult{took: time.Since(start)}, nil
 	}
-	if err := h.enc.Encode(patch); err != nil {
-		return nil, &hotlink.Refusal{Reason: "the app is gone: " + err.Error()}
-	}
-	var reply hotpatch.Reply
-	if err := h.dec.Decode(&reply); err != nil {
+	reply, err := h.client.Do(hotpatch.Request{Patch: patch})
+	if err != nil {
 		return nil, &hotlink.Refusal{Reason: "the app is gone: " + err.Error()}
 	}
 	if reply.Err != "" {

@@ -7,6 +7,8 @@
 // it. internal/hotlink makes the patches, in mygo dev.
 package hotpatch
 
+import "encoding/gob"
+
 // Patch is a piece of code linked to run at Base, and what to do with it.
 type Patch struct {
 	Base uint64 // where it goes, in the region Hello gave
@@ -17,10 +19,15 @@ type Patch struct {
 
 	RodataAt, DataAt, End uint64
 
-	Module      uint64 // its runtime.moduledata
-	NextOffset  uint64 // of the field that links modules
-	LastModule  uint64 // runtime.lastmoduledatap
-	ModulesInit uint64 // runtime.modulesinit
+	Module      uint64   // its runtime.moduledata
+	NextOffset  uint64   // of the field that links modules
+	LastModule  uint64   // runtime.lastmoduledatap
+	ModulesInit uint64   // runtime.modulesinit
+	Itabs       []uint64 // the itabs it brings
+	ItabAdd     uint64   // runtime.itabAdd
+	ItabLock    uint64   // runtime.itabLock
+	Lock        uint64   // runtime.lock2
+	Unlock      uint64   // runtime.unlock2
 	Jumps       []Jump
 	Writes      []Write
 	Functions   []string // the names of the functions it replaces, to report
@@ -54,7 +61,40 @@ type Reserved struct {
 	Err      string
 }
 
-// Reply is what a program answers a Patch with.
+// Request is what mygo dev asks of a program.
+type Request struct {
+	Patch *Patch
+	// Itab asks whether the program has an itab of this interface and type, in
+	// the table of the runtime, whose address follows.
+	Itab *ItabQuery
+}
+
+// ItabQuery asks for an itab.
+type ItabQuery struct {
+	Inter, Type uint64
+	Table       uint64 // runtime.itabTable
+}
+
+// Reply is what a program answers a Request with.
 type Reply struct {
-	Err string
+	Err  string
+	Itab uint64
+}
+
+// Client asks a program for what it can do, over a connection of Serve's.
+type Client struct {
+	Enc *gob.Encoder
+	Dec *gob.Decoder
+}
+
+// Do sends a request and waits for the answer.
+func (c *Client) Do(r Request) (Reply, error) {
+	var reply Reply
+	if err := c.Enc.Encode(r); err != nil {
+		return reply, err
+	}
+	if err := c.Dec.Decode(&reply); err != nil {
+		return reply, err
+	}
+	return reply, nil
 }

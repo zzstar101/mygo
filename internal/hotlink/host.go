@@ -58,6 +58,9 @@ type host struct {
 	text, etext uint64 // the program's code
 	pcHeader    []byte
 
+	typesAt, etypes uint64 // where type descriptors lie
+	seen            map[uint64]bool
+
 	segs []segment
 }
 
@@ -206,6 +209,11 @@ func (h *host) readModule() error {
 	if h.pcHeader == nil {
 		return errors.New("the executable has no function table")
 	}
+	h.typesAt, h.etypes = types, etypes
+	// The descriptors with a typelink lie one after the other, and those
+	// without among other data; but what is alive is reachable, so they are
+	// found by what they are referred to from.
+	var queue []uint64
 	end := types + h.u64(md+mdTypedesclen)
 	for td := types + 8; td < end; {
 		td = (td + 7) &^ 7
@@ -217,13 +225,13 @@ func (h *host) readModule() error {
 		if err != nil {
 			return err
 		}
-		str := h.typeString(types, b)
-		h.types[typeKey{binary.LittleEndian.Uint32(b[typeHash:]), str}] = td
+		queue = append(queue, td)
 		td += uint64(size)
 	}
 	for p, e := types+h.u64(md+mdItaboffset), types+h.u64(md+mdItaboffset)+h.u64(md+mdItabsize); p < e; {
 		inter, typ := h.u64(p), h.u64(p+8)
 		h.itabs[[2]uint64{inter, typ}] = p
+		queue = append(queue, inter, typ)
 		b := h.read(inter, 80)
 		if b == nil {
 			return fmt.Errorf("an itab out of range at %#x", p)
@@ -231,7 +239,83 @@ func (h *host) readModule() error {
 		n := max(binary.LittleEndian.Uint64(b[64:]), 1)
 		p += 24 + 8*n
 	}
+	h.seen = map[uint64]bool{}
+	h.walkTypes(queue)
 	return nil
+}
+
+// walkTypes adds to what it knows the descriptors given, and all they refer to.
+func (h *host) walkTypes(queue []uint64) {
+	le := binary.LittleEndian
+	for len(queue) > 0 {
+		td := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if td < h.typesAt || td >= h.etypes || h.seen[td] {
+			continue
+		}
+		h.seen[td] = true
+		t := h.read(td, typeHeader)
+		if t == nil {
+			continue
+		}
+		h.types[typeKey{le.Uint32(t[typeHash:]), h.typeString(h.typesAt, t)}] = td
+		k := t[typeKind] & 0x1f
+		full := h.read(td, 80)
+		if full == nil {
+			continue
+		}
+		base, _, err := kindSizes(k, full)
+		if err != nil {
+			continue
+		}
+		off := func(rel int32) {
+			if rel > 0 {
+				queue = append(queue, h.typesAt+uint64(rel))
+			}
+		}
+		off(int32(le.Uint32(t[44:]))) // PtrToThis
+		switch k {
+		case kArray, kChan, kPointer, kSlice:
+			queue = append(queue, le.Uint64(full[48:]))
+		case kMap:
+			queue = append(queue, le.Uint64(full[48:]), le.Uint64(full[56:]), le.Uint64(full[64:]))
+		case kStruct:
+			fields, n := le.Uint64(full[56:]), le.Uint64(full[64:])
+			for i := range n {
+				queue = append(queue, h.u64(fields+i*24+8))
+			}
+		case kInterface:
+			methods, n := le.Uint64(full[56:]), le.Uint64(full[64:])
+			for i := range n {
+				if b := h.read(methods+i*8+4, 4); b != nil {
+					off(int32(le.Uint32(b)))
+				}
+			}
+		case kFunc:
+			params := td + uint64(base)
+			if t[typeTFlag]&tflagUncommon != 0 {
+				params += uncommonSize
+			}
+			in := uint64(le.Uint16(full[48:]))
+			out := uint64(le.Uint16(full[50:]) &^ (1 << 15))
+			for i := range in + out {
+				queue = append(queue, h.u64(params+i*8))
+			}
+		}
+		if t[typeTFlag]&tflagUncommon != 0 {
+			u := h.read(td+uint64(base), uncommonSize)
+			if u == nil {
+				continue
+			}
+			moff, count := uint64(le.Uint32(u[8:])), uint64(le.Uint16(u[4:]))
+			at := td + uint64(base) + moff
+			for i := range count {
+				if b := h.read(at+i*methodSize+4, 4); b != nil {
+					off(int32(le.Uint32(b)))
+				}
+			}
+		}
+	}
 }
 
 // The layout of abi.Type and of what follows it.

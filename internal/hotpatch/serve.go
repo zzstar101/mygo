@@ -25,6 +25,18 @@ const RegionSize = 64 << 20
 // space, of a development build only.
 var region [RegionSize]byte
 
+// keepMethods has the linker keep every exported method of the types it keeps,
+// as a call of reflect.Type.Method tells it to. An edit may call one through an
+// interface no code had asked for, which otherwise is gone, and fatal.
+//
+//go:noinline
+func keepMethods(v any) int {
+	if t := reflect.TypeOf(v); t != nil && t.NumMethod() > 0 {
+		return len(t.Method(0).Name)
+	}
+	return 0
+}
+
 // Serve connects to mygo dev at addr and applies the patches it sends, each
 // through run, which must call its argument on the thread where app code is
 // not running, and return once it did. applied runs after each. It returns when
@@ -35,6 +47,7 @@ func Serve(addr string, run func(func()), applied func()) error {
 		return err
 	}
 	defer c.Close()
+	keepMethods(c)
 	enc, dec := gob.NewEncoder(c), gob.NewDecoder(c)
 	if err := enc.Encode(Hello{runtime.Version(), uint64(reflect.ValueOf(Probe).Pointer())}); err != nil {
 		return err
@@ -56,22 +69,51 @@ func Serve(addr string, run func(func()), applied func()) error {
 		return fmt.Errorf("hotpatch: %s", reserved.Err)
 	}
 	for {
-		var p Patch
-		if err := dec.Decode(&p); err != nil {
+		var r Request
+		if err := dec.Decode(&r); err != nil {
 			return err
 		}
 		var reply Reply
-		run(func() {
-			if err := apply(&p); err != nil {
-				reply.Err = err.Error()
-			}
-		})
+		if r.Itab != nil {
+			reply.Itab = findItab(*r.Itab)
+		}
+		if r.Patch != nil {
+			run(func() {
+				if err := apply(r.Patch); err != nil {
+					reply.Err = err.Error()
+				}
+			})
+		}
 		if err := enc.Encode(reply); err != nil {
 			return err
 		}
-		if reply.Err == "" && applied != nil {
+		if r.Patch != nil && reply.Err == "" && applied != nil {
 			applied()
 		}
+	}
+}
+
+// findItab looks an itab up as the runtime does (itabTableType.find), which may
+// run while others add to the table.
+func findItab(q ItabQuery) uint64 {
+	table := atomic.LoadUint64((*uint64)(at(q.Table)))
+	if table == 0 {
+		return 0
+	}
+	const entries = 16 // after the fields size and count
+	size := *(*uint64)(at(table))
+	mask := size - 1
+	hash := func(t uint64) uint32 { return *(*uint32)(at(t + 16)) }
+	h := uint64(hash(q.Inter)^hash(q.Type)) & mask
+	for i := uint64(1); ; i++ {
+		m := atomic.LoadUint64((*uint64)(at(table + entries + h*8)))
+		if m == 0 {
+			return 0
+		}
+		if *(*uint64)(at(m)) == q.Inter && *(*uint64)(at(m + 8)) == q.Type {
+			return m
+		}
+		h = (h + i) & mask
 	}
 }
 
@@ -113,6 +155,18 @@ func apply(p *Patch) error {
 	atomic.StoreUint64(last, p.Module)
 	callNoArgs(uintptr(p.ModulesInit))
 
+	// As runtime.itabsinit has it take a module's, under its lock.
+	if len(p.Itabs) > 0 {
+		lock := callPointer(uintptr(p.Lock))
+		unlock := callPointer(uintptr(p.Unlock))
+		add := callPointer(uintptr(p.ItabAdd))
+		lock(at(p.ItabLock))
+		for _, itab := range p.Itabs {
+			add(at(itab))
+		}
+		unlock(at(p.ItabLock))
+	}
+
 	for _, w := range p.Writes {
 		copy(bytesAt(w.At, uint64(len(w.Data))), w.Data)
 	}
@@ -128,6 +182,12 @@ func apply(p *Patch) error {
 func callNoArgs(pc uintptr) {
 	fv := &pc
 	(*(*func())(unsafe.Pointer(&fv)))()
+}
+
+// callPointer returns the function at pc that takes a pointer.
+func callPointer(pc uintptr) func(unsafe.Pointer) {
+	fv := &pc
+	return *(*func(unsafe.Pointer))(unsafe.Pointer(&fv))
 }
 
 // jumpInsn returns what to put at from to jump to to, in the 8 aligned bytes

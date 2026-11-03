@@ -40,10 +40,13 @@ such as Accessibility, Screen Recording or reading its Keychain items; ad
 hoc signatures, which it falls back to without one, change with every
 build. -sign signs with another identity; -sign - signs ad hoc.
 
-Changes to the Go code, mygo.json or mygo.config.ts, the icon, the
-resources or the catalogs of messages rebuild the app, regenerate the
-TypeScript client and the accessors of the catalogs, and relaunch it. A build that fails to compile keeps the previous one running; the next
-change tries again. Frontend changes are left to the dev server. Quitting the app ends mygo dev.
+Saving Go code changes the running app in place, in about a tenth of a second:
+its windows, web pages and memory stay. What that cannot carry, as a struct that
+changed its layout, and changes to mygo.json or mygo.config.ts, the icon, the
+resources or the catalogs of messages rebuild the app, regenerate the TypeScript
+client and the accessors of the catalogs, and relaunch it. A build that fails to
+compile keeps the previous one running; the next change tries again. Frontend
+changes are left to the dev server. Quitting the app ends mygo dev.
 
 On a terminal, type r and Enter to rebuild and restart the app, c to clear
 the console, q to quit, h for help.
@@ -239,6 +242,10 @@ type devSession struct {
 	hotBuild *hotBuild
 	// hot, used by one build or patch at a time, is that of the running build.
 	hot *hotReloader
+	// inputs is what the watcher watches, and stamp how it looked as the last
+	// build began.
+	inputs *buildInputs
+	stamp  map[string]string
 
 	// live is app, which a build stops before it starts.
 	liveMu sync.Mutex
@@ -278,6 +285,7 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 	w := &watcher{}
 	if in, err := listBuildInputs(c); err == nil {
 		w.set(in)
+		s.inputs = in
 	} else {
 		warnf("%v", err)
 	}
@@ -461,6 +469,7 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 			}
 			if r.inputs != nil {
 				w.set(r.inputs)
+				s.inputs = r.inputs
 				if !importChecked && r.err == nil {
 					importChecked = true
 					checkCatalogImported(c, r.inputs.sourceDirs)
@@ -652,6 +661,9 @@ func (s *devSession) buildAndLaunch(ctx context.Context, t *task, running [32]by
 	flags := []string{"-ldflags", strings.TrimSpace(packageFlags(dc))}
 	if s.hotBuild != nil {
 		flags = append(flags, s.hotBuild.flags...)
+		if s.inputs != nil {
+			s.stamp = snapshot(s.inputs)
+		}
 	}
 	err = goBuild(ctx, c, t, bin, nil, flags...)
 	cleanup()
@@ -887,7 +899,7 @@ func (s *devSession) launch(exe string) (*devProcess, error) {
 		if err != nil {
 			return nil, err
 		}
-		hot.start(c, s.hotBuild, exe)
+		hot.start(c, s.hotBuild, exe, s.inputs, s.stamp)
 	}
 	p := &devProcess{exe: exe, cmd: cmd, done: make(chan struct{})}
 	go func() {

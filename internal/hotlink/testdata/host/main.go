@@ -16,6 +16,9 @@ import (
 // point has a layout the tests' edits may change.
 type point struct{ x, y int }
 
+// Area is called by nothing in the program, which only edits may change.
+func (p *point) Area() int { return p.x * p.y }
+
 func (p *point) sum() int { return p.x + p.y }
 
 var (
@@ -25,6 +28,28 @@ var (
 	sentinel = errors.New("the host's error") // identity matters
 	held     func() string                    // a closure of the old code
 	work     = make(chan func() string, 1)
+)
+
+// Types the program reaches in ways that have no typelink.
+type onlyValue struct{ a int }
+type onlyPointer struct{ a int }
+type namedSlice []int
+
+var (
+	heldValue   any = onlyValue{1}
+	heldPointer any = &onlyPointer{2}
+	heldNamed   any = namedSlice{1, 2}
+)
+
+// dynamicIface and dynamic meet only in a conversion as the program runs.
+type dynamicIface interface{ value() int }
+type dynamic struct{ n int }
+
+func (d *dynamic) value() int { return d.n }
+
+var (
+	heldDynamic dynamicIface
+	source      any = &dynamic{7}
 )
 
 //go:noinline
@@ -68,6 +93,9 @@ func main() {
 			}
 			calls++
 			switch line {
+			case "convert":
+				heldDynamic = source.(dynamicIface)
+				fmt.Println("made")
 			case "message":
 				fmt.Println(message())
 			case "lib":

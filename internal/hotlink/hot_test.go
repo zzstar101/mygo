@@ -18,15 +18,17 @@ import (
 
 // running is the host program, patched as it runs.
 type running struct {
-	t    *testing.T
-	in   io.WriteCloser
-	out  *bufio.Reader
-	enc  *gob.Encoder
-	dec  *gob.Decoder
-	sess *Session
-	comp *Compiler
-	pkgs map[string]*Package
-	dir  string // the copy of the host that edits change
+	t   *testing.T
+	in  io.WriteCloser
+	out *bufio.Reader
+	enc *gob.Encoder
+	dec *gob.Decoder
+
+	client *hotpatch.Client
+	sess   *Session
+	comp   *Compiler
+	pkgs   map[string]*Package
+	dir    string // the copy of the host that edits change
 }
 
 const hostModule = "github.com/egoist/mygo/internal/hotlink/testdata"
@@ -60,6 +62,9 @@ func start(t *testing.T) *running {
 		write(t, filepath.Join(work, name), rehome(string(b), suffix))
 	}
 	exe := filepath.Join(tmp, "host")
+	if runtime.GOOS == "windows" {
+		exe += ".exe"
+	}
 	flags := BuildFlags(hostModule)
 	build := exec.Command("go", append(append([]string{"build"}, flags...), "-o", exe, "./"+work)...)
 	if out, err := build.CombinedOutput(); err != nil {
@@ -138,6 +143,8 @@ func start(t *testing.T) *running {
 		t.Fatal(reserved.Err)
 	}
 	sess.Reserved(reserved.At, reserved.Size)
+	r.client = &hotpatch.Client{Enc: r.enc, Dec: r.dec}
+	sess.UseClient(r.client)
 	return r
 }
 
@@ -199,11 +206,8 @@ func (r *running) patch(keys ...string) (int, error) {
 	if p == nil {
 		return 0, nil
 	}
-	if err := r.enc.Encode(p); err != nil {
-		r.t.Fatal(err)
-	}
-	var reply hotpatch.Reply
-	if err := r.dec.Decode(&reply); err != nil {
+	reply, err := r.client.Do(hotpatch.Request{Patch: p})
+	if err != nil {
 		r.t.Fatal(err)
 	}
 	if reply.Err != "" {
@@ -266,7 +270,7 @@ func TestPatchKeepsRuntimeWorking(t *testing.T) {
 	r.want("stress", strings.Join([]string{
 		"alloc 88890",
 		"deep 10000",
-		"recovered assignment to entry in nil map at main.go:81",
+		"recovered assignment to entry in nil map at main.go:106",
 		"self main.stress",
 		"generic 1 2",
 		"goroutines 4028",
@@ -423,4 +427,40 @@ func TestCompileError(t *testing.T) {
 		t.Fatalf("got %v, want the compiler's complaint", err)
 	}
 	r.want("message", "v1")
+}
+
+// An interface the program never asked for reaches a method of a type it has.
+func TestNewInterfaceOnExistingType(t *testing.T) {
+	r := start(t)
+	if _, err := r.edit(`return "no stress in v1"`, `var v any = &point{x: 3, y: 4}
+	return fmt.Sprint(v.(interface{ Area() int }).Area())`); err != nil {
+		t.Fatal(err)
+	}
+	r.want("stress", "12")
+}
+
+// A named type that only reaches an interface is the program's own, in new code.
+func TestTypesAreThePrograms(t *testing.T) {
+	r := start(t)
+	if _, err := r.edit(`return "no stress in v1"`, `_, isValue := heldValue.(onlyValue)
+	_, isPointer := heldPointer.(*onlyPointer)
+	got, isNamed := heldNamed.(namedSlice)
+	return fmt.Sprint(isValue, isPointer, isNamed, len(got), reflect.TypeOf(onlyValue{}) == reflect.TypeOf(heldValue))`,
+		`"sync"`, "\"reflect\"\n\t\"sync\""); err != nil {
+		t.Fatal(err)
+	}
+	r.want("stress", "true true true 2 true")
+}
+
+// An itab the running program made for a conversion is the one new code takes:
+// it compares them by address.
+func TestItabsAreThePrograms(t *testing.T) {
+	r := start(t)
+	r.want("convert", "made")
+	if _, err := r.edit(`return "no stress in v1"`, `d, ok := heldDynamic.(*dynamic)
+	var again dynamicIface = d
+	return fmt.Sprint(ok, again == heldDynamic, d.value())`); err != nil {
+		t.Fatal(err)
+	}
+	r.want("stress", "true true 7")
 }

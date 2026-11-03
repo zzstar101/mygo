@@ -72,7 +72,14 @@ func kindSection(k uint8) (section, bool) {
 // addressed data), what is its object's alone, and the pointer masks of stack
 // objects, which the runtime finds only from the module of their function.
 func carried(t target) bool {
-	return strings.HasPrefix(t.key, "#") || t.abi == abiStatic || strings.HasPrefix(t.name, "runtime.gcbits.")
+	return strings.HasPrefix(t.key, "#") || t.abi == abiStatic || strings.HasPrefix(t.name, "runtime.gcbits.") || isNumbered(t.name)
+}
+
+// isNumbered reports whether a symbol's name is only a number the compiler
+// gave it in its package, which another compile gives to another: a name says
+// nothing of what it is.
+func isNumbered(name string) bool {
+	return strings.Contains(name, "..typeAssert.") || strings.Contains(name, "..interfaceSwitch.")
 }
 
 // hostAddr returns where the running program has a symbol.
@@ -103,7 +110,11 @@ func (l *linker) typeAddr(t target) (uint64, bool) {
 		return 0, false
 	}
 	str := l.nameOf(t)
-	if a, ok := l.s.host.types[typeKey{binary.LittleEndian.Uint32(d[typeHash:]), str}]; ok {
+	key := typeKey{binary.LittleEndian.Uint32(d[typeHash:]), str}
+	if a, ok := l.s.host.types[key]; ok {
+		return a + l.s.slide, true
+	}
+	if a, ok := l.s.typeInCode(key, t.key); ok {
 		return a + l.s.slide, true
 	}
 	return 0, false
@@ -153,11 +164,20 @@ func (l *linker) itabAddr(t target) (uint64, bool) {
 			typ = a
 		}
 	}
-	a, ok := l.s.host.itabs[[2]uint64{inter - l.s.slide, typ - l.s.slide}]
-	if !ok {
+	if inter == 0 || typ == 0 {
 		return 0, false
 	}
-	return a + l.s.slide, true
+	if a, ok := l.s.host.itabs[[2]uint64{inter - l.s.slide, typ - l.s.slide}]; ok {
+		return a + l.s.slide, true
+	}
+	// One the running program made for a conversion may exist. Code compares
+	// itabs by address, so the patch must use that one.
+	if l.s.QueryItab != nil {
+		if a, err := l.s.QueryItab(inter, typ); err == nil && a != 0 {
+			return a, true
+		}
+	}
+	return 0, false
 }
 
 // lookup says where a symbol is: in the patch, or in the program. A symbol
@@ -477,6 +497,26 @@ func (l *linker) lay(fns []target, writes []varWrite) (*hotpatch.Patch, error) {
 		ModulesInit: modulesInit + s.slide,
 	}
 
+	// The runtime must find the itabs the patch brings, or a conversion makes
+	// another, which code comparing them by address would not take for it.
+	if patch.ItabAdd, ok1 = symbolAt(s, "runtime.itabAdd"); !ok1 {
+		return nil, refuse("the program's runtime does not have what hot reload needs")
+	}
+	if patch.ItabLock, ok1 = symbolAt(s, "runtime.itabLock"); !ok1 {
+		return nil, refuse("the program's runtime does not have what hot reload needs")
+	}
+	if patch.Lock, ok1 = symbolAt(s, "runtime.lock2"); !ok1 {
+		return nil, refuse("the program's runtime does not have what hot reload needs")
+	}
+	if patch.Unlock, ok1 = symbolAt(s, "runtime.unlock2"); !ok1 {
+		return nil, refuse("the program's runtime does not have what hot reload needs")
+	}
+	for _, p := range l.order[secRodata] {
+		if p.t.o.symFlag2(p.t.i)&symFlag2Itab != 0 {
+			patch.Itabs = append(patch.Itabs, p.addr)
+		}
+	}
+
 	// Jumps: every copy of each replaced function goes to the new code.
 	for _, f := range fns {
 		p := l.placed[f.key]
@@ -515,6 +555,11 @@ func (l *linker) lay(fns []target, writes []varWrite) (*hotpatch.Patch, error) {
 		}
 	}
 	return patch, nil
+}
+
+func symbolAt(s *Session, name string) (uint64, bool) {
+	a, ok := s.host.syms[name]
+	return a + s.slide, ok
 }
 
 // hostAddrOriginal returns the function in the image, not a patch's.
