@@ -1,7 +1,7 @@
 # Hot reload
 
-`mygo dev` changes the code of the running app as you save, usually in about a
-tenth of a second. The process stays, and everything it holds stays with it:
+`mygo dev -hot` changes the code of the running app as you save, usually in about
+a tenth of a second. The process stays, and everything it holds stays with it:
 its windows and where they are, the page in a web view and what its JavaScript
 holds, open files and connections, and every value in memory.
 
@@ -9,13 +9,14 @@ holds, open files and connections, and every value in memory.
   ✓ Reloaded (*counter).view (main.go changed)  67ms
 ```
 
-There is nothing to set up, and no change to your code. Native UI shows the
+It is opt-in: plain `mygo dev` restarts the app on every change. It needs no
+change to your code. Native UI shows the
 change in its next frame, since a view runs again for every frame it builds. A
 web page keeps running, and its next call into Go runs the new code. Frontend
 changes are still the dev server's, as Vite's hot module replacement.
 
 A restart is what happens when a change cannot be applied in place, and `mygo
-dev` says why:
+dev -hot` says why:
 
 ```
   • Restarting: the layout of main.counter changed
@@ -73,11 +74,11 @@ and Enter.
 
 ## When it runs
 
-In `mygo dev`, for the app's own module and the modules it replaces with a
+With `mygo dev -hot`, for the app's own module and the modules it replaces with a
 directory, on macOS, Linux and Windows, on arm64 and amd64, with Go 1.27. With
-another Go, or with `CGO_ENABLED=1`, every change restarts the app. `mygo dev
--no-hot` turns it off.
+another Go, or with `CGO_ENABLED=1`, it says so, and every change restarts the
+app. It does not work with `-web`, which reloads the page.
 
-Development builds of the app's own packages have inlining off, for a function's
-callers not to hold copies of it. `mygo build` builds apps as before, and none
+With `-hot`, development builds of the app's own packages have inlining off, for
+a function's callers not to hold copies of it. `mygo build` builds apps as before, and none
 of this is in them.

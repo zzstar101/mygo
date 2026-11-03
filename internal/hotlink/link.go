@@ -6,7 +6,7 @@
 // masks), so that the program takes them as it takes a plugin.
 //
 // It refuses what code alone cannot carry over, as a struct that changed its
-// layout while values of it are alive: mygo dev restarts the app then.
+// layout while values of it are alive: mygo dev -hot restarts the app then.
 //
 // It reads what Go's linker reads, in the formats of the Go it supports
 // (checkToolchain); any other Go restarts as well.

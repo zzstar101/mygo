@@ -167,6 +167,8 @@ func wakeUp(wake chan<- struct{}) {
 // when the system tells of a change. Stat'ing a few hundred files a few times a
 // second is cheap and needs no platform APIs.
 type watcher struct {
+	notify bool // also look when the system tells of a change, set before watch
+
 	mu     sync.Mutex
 	inputs *buildInputs
 	reset  bool // inputs changed: take a new baseline
@@ -308,7 +310,10 @@ func (w *watcher) watch(ctx context.Context, interval time.Duration) <-chan []st
 		tick := time.NewTicker(interval)
 		defer tick.Stop()
 		wake := make(chan struct{}, 1)
-		notices := newNotifier(wake)
+		var notices notifier = noNotifier{}
+		if w.notify {
+			notices = newNotifier(wake)
+		}
 		var settle <-chan time.Time
 		for {
 			woken := false
@@ -350,7 +355,9 @@ func (w *watcher) watch(ctx context.Context, interval time.Duration) <-chan []st
 					}
 				}
 				last, settling = cur, true
-				settle = time.After(settleAfter)
+				if w.notify {
+					settle = time.After(settleAfter)
+				}
 				notices.sync(in.notified(cur), moved)
 			case woken && settling:
 				// Another notice of what it saw: it settles by the timer.

@@ -5264,10 +5264,9 @@ renderer's (`gputest.Compare`).
     has `mygo dev` start the same build again. Production builds ignore it.
     A build counts as started once its process is: one that crashes on
     start is reported as it exits.
-  - *Hot reload.* A save first goes to the running app (see "Hot reload"
-    below); what that refuses rebuilds and restarts.
-  - *Reload.* A change (polling every 250 ms, and at once when the system
-    tells of one, debounced) rebuilds;
+  - *Hot reload.* With `-hot`, a save first goes to the running app (see "Hot
+    reload" below); what that refuses rebuilds and restarts.
+  - *Reload.* A change (polling every 250 ms, debounced) rebuilds;
     when the executable, Info.plist and icon are unchanged nothing restarts.
     Otherwise the running build is sent SIGTERM (quit sequence), then
     SIGKILL after 3 s, and the new one starts once it has exited: builds
@@ -5276,7 +5275,8 @@ renderer's (`gputest.Compare`).
     end the processes it started; those left after it exits are killed. A
     build that fails to compile leaves the old one running; one that fails
     to start leaves none until the next change.
-  - *Noticing.* Polling stays the source of truth of what changed: a
+  - *Noticing.* With `-hot`, the watcher also looks when the system tells of
+    a change. Polling stays the source of truth of what changed: a
     notifier (`notify_*.go`: kqueue on the files on macOS, inotify on the
     directories on Linux, `ReadDirectoryChangesW` on Windows) only says
     when to look, and a change counts once it holds still for 15 ms.
@@ -5506,7 +5506,8 @@ profile).
 
 ## Hot reload (`internal/hotlink`, `internal/hotpatch`)
 
-A save reaches the running app without a restart, so what it holds stays. Go has
+With `mygo dev -hot`, a save reaches the running app without a restart, so what
+it holds stays. Go has
 no way to load code without cgo (`plugin` needs it, and does not exist on
 Windows), so MyGo links what changed itself, and the runtime takes the result
 as it takes a plugin. It is the design of incremental linkers for native code:
@@ -5517,7 +5518,7 @@ a thin link against the running image, and a fallback to restarting.
           (cmd/compile, 50 ms)   hotlink         hotlink       hotpatch, in the app
 ```
 
-- **Only development builds have it.** `mygo dev` builds with the tag `mygo_hot`,
+- **Only `-hot` builds have it.** `mygo dev -hot` builds with the tag `mygo_hot`,
   which links `hot_on.go` and `internal/hotpatch`, and no inlining in the app's
   packages (`-gcflags=<module>/...=-l`), so that a function's callers hold no
   copy of it and an edit recompiles one package. Nothing reaches other builds:

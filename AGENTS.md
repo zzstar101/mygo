@@ -63,7 +63,8 @@ bun install && bun run test && bun run typecheck   # the workspace, from the roo
 bun run build                              # build internal/bridge/bridge.js and the npm packages' dist/
 bun run --cwd packages/cli binaries        # cross-compile the CLI into the mygo-cli platform packages
 go run ./cmd/mygo generate examples/todo   # regenerate an example's TypeScript client
-go run ./cmd/mygo dev examples/todo        # hot reload, else restarts (dev bundle in examples/todo/.mygo)
+go run ./cmd/mygo dev examples/todo        # live reload (dev bundle in examples/todo/.mygo)
+go run ./cmd/mygo dev -hot examples/todo   # hot reload: a save changes the running app, else restarts it
 go run ./cmd/mygo dev -web examples/counter-native   # native UI in the browser, with live reload
 go run ./cmd/mygo build examples/todo      # .app + .dmg in examples/todo/build
 go run ./cmd/mygo build -platform web examples/counter-native   # a static site in examples/counter-native/dist/web
@@ -146,7 +147,7 @@ Windows GUI tests need Windows with the WebView2 Runtime (a GitHub Actions
   guide); never commit the CLI's binaries.
 - The configuration types of `packages/cli/index.d.ts` (for `mygo.config.ts`)
   mirror `Config` in `cmd/mygo/config.go`; `TestConfigTypes` checks them.
-- Hot reload (`internal/hotlink`, `internal/hotpatch`, `mygo dev`) reads Go's
+- Hot reload (`internal/hotlink`, `internal/hotpatch`, `mygo dev -hot`) reads Go's
   object files and writes the runtime's tables, so a new Go release needs its
   checklist ("Hot reload" in the architecture guide), and restarts apps until
   then. It must never reach a build without the tag `mygo_hot`.

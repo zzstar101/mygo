@@ -9,7 +9,7 @@ import (
 	"github.com/egoist/mygo/internal/hotpatch"
 )
 
-// mygo dev builds apps with the tag mygo_hot and tells them where to connect
+// mygo dev -hot builds apps with the tag mygo_hot and tells them where to connect
 // with MYGO_HOT: an edit then reaches the running app (internal/hotpatch).
 // Without the tag, none of this is linked.
 func init() {

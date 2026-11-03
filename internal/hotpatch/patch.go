@@ -3,7 +3,7 @@
 // of it as of a plugin, and the functions it replaces jump to it. The process,
 // its windows, its web pages and its memory stay.
 //
-// Only development builds (the build tag mygo_hot, which mygo dev sets) link
+// Only development builds (the build tag mygo_hot, which mygo dev -hot sets) link
 // it. internal/hotlink makes the patches, in mygo dev.
 package hotpatch
 

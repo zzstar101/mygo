@@ -40,13 +40,13 @@ such as Accessibility, Screen Recording or reading its Keychain items; ad
 hoc signatures, which it falls back to without one, change with every
 build. -sign signs with another identity; -sign - signs ad hoc.
 
-Saving Go code changes the running app in place, in about a tenth of a second:
-its windows, web pages and memory stay. What that cannot carry, as a struct that
-changed its layout, and changes to mygo.json or mygo.config.ts, the icon, the
-resources or the catalogs of messages rebuild the app, regenerate the TypeScript
-client and the accessors of the catalogs, and relaunch it. A build that fails to
-compile keeps the previous one running; the next change tries again. Frontend
-changes are left to the dev server. Quitting the app ends mygo dev.
+With -hot, saving Go code changes the running app in place, in about a tenth of a
+second: its windows, web pages and memory stay. What that cannot carry, as a
+struct that changed its layout, and changes to mygo.json or mygo.config.ts, the
+icon, the resources or the catalogs of messages rebuild the app, regenerate the
+TypeScript client and the accessors of the catalogs, and relaunch it. A build
+that fails to compile keeps the previous one running; the next change tries
+again. Frontend changes are left to the dev server. Quitting the app ends mygo dev.
 
 On a terminal, type r and Enter to rebuild and restart the app, c to clear
 the console, q to quit, h for help.
@@ -66,7 +66,7 @@ keep it: the app's own setting is left as it is.`)
 	port := flags.Int("port", 5174, "with -web, the port to serve the app at, or the next free one")
 	openPage := flags.Bool("open", true, "with -web, open the app in the browser")
 	lang := flags.String("lang", "", "run the app in this language (as de, or the pseudo locales en-XA and ar-XB), without keeping it")
-	noHot := flags.Bool("no-hot", false, "restart the app on every change, instead of changing its code as it runs")
+	hot := flags.Bool("hot", false, "change the code of the running app on save, restarting it only when that cannot be done")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -79,6 +79,9 @@ keep it: the app's own setting is left as it is.`)
 		return err
 	}
 	if *web {
+		if *hot {
+			return errors.New("-hot does not work with -web, which reloads the page")
+		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		con.startBanner("dev")
@@ -88,7 +91,7 @@ keep it: the app's own setting is left as it is.`)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	s := &devSession{root: c.root, sign: devSign(c, *sign), name: devConfig(c).Name, env: []string{"MYGO_ENV=development"}}
-	if !*noHot {
+	if *hot {
 		s.hotBuild = newHotBuild(c)
 	}
 	if locale != "" {
@@ -282,7 +285,7 @@ const devRelaunchCode = 75
 // run launches the app and rebuilds it on changes until the app quits or
 // ctx is done.
 func (s *devSession) run(ctx context.Context, c *Config) error {
-	w := &watcher{}
+	w := &watcher{notify: s.hotBuild != nil}
 	if in, err := listBuildInputs(c); err == nil {
 		w.set(in)
 		s.inputs = in

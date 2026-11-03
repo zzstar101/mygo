@@ -24,10 +24,11 @@ type hotBuild struct {
 	flags []string // for go build and go list
 }
 
-// newHotBuild returns the flags of a development build to patch as it runs,
-// or nil where hot reload is not supported: such apps restart on every change.
+// newHotBuild returns the flags of a development build to patch as it runs, or
+// nil, having said why, where -hot cannot work: such apps restart on every change.
 func newHotBuild(c *Config) *hotBuild {
 	if !hotlink.SupportedPlatform(runtime.GOOS, runtime.GOARCH) {
+		warnf("Hot reload does not support %s/%s: every change restarts the app", runtime.GOOS, runtime.GOARCH)
 		return nil
 	}
 	v := goEnv("GOVERSION")
@@ -36,6 +37,7 @@ func newHotBuild(c *Config) *hotBuild {
 		return nil
 	}
 	if os.Getenv("CGO_ENABLED") == "1" {
+		warnf("Hot reload does not support CGO_ENABLED=1: every change restarts the app")
 		return nil
 	}
 	flags := []string{"-tags=mygo_hot"}
