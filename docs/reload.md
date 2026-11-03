@@ -133,7 +133,7 @@ is this in an app: a note and a counter that survive the reload.
   process, which quits with the app. Its URL comes back, and what lives in the
   app's profile is there again: cookies, `localStorage`, IndexedDB and caches
   ([browsing data](app.md#browsing-data)). A page that wants to survive a
-  reload puts what matters in storage, or use `mygo dev -hot`, which keeps it.
+  reload puts what matters in storage. `mygo dev -hot` keeps it, for the changes it can apply.
 - **Anything that is not a value.** `Save` hands over JSON, not handles: a
   file being written, a socket, a subprocess, a media position or a
   background job has to be reopened or restarted by the new build. Leave a
