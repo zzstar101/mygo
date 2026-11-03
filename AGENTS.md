@@ -65,6 +65,7 @@ bun run --cwd packages/cli binaries        # cross-compile the CLI into the mygo
 go run ./cmd/mygo generate examples/todo   # regenerate an example's TypeScript client
 go run ./cmd/mygo dev examples/todo        # live reload (dev bundle in examples/todo/.mygo)
 go run ./cmd/mygo dev -hot examples/todo   # hot reload: a save changes the running app, else restarts it
+go run ./cmd/mygo dev examples/reload-state  # what a restart hands to the next build (App.OnReload)
 go run ./cmd/mygo dev -web examples/counter-native   # native UI in the browser, with live reload
 go run ./cmd/mygo build examples/todo      # .app + .dmg in examples/todo/build
 go run ./cmd/mygo build -platform web examples/counter-native   # a static site in examples/counter-native/dist/web

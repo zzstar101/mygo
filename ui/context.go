@@ -147,7 +147,7 @@ func (c *context) reset(now time.Time, w, h float32) {
 	// The window's elements are named from the root's name, and an
 	// overlay's from its layer's: an element at the same place in an
 	// overlay is not the element the window has there.
-	root.reloadID = root.id
+	root.reloadNameRoot()
 	root.kind = kindBox
 	root.width, root.height = px(w), px(h)
 	root.st = c.rt.stateFor(root.id)
@@ -220,7 +220,7 @@ func (c *context) overlayRoot() *node {
 		o := c.alloc()
 		o.c = c
 		o.id = overlayID
-		o.reloadID = o.id
+		o.reloadNameRoot()
 		o.kind = kindBox
 		o.flags = flagAbsolute | flagPassThrough
 		o.dir = c.root.dir
@@ -247,17 +247,13 @@ func (c *context) newElement(k kind) *node {
 	e.kind = k
 	p := c.parent
 	e.id = mix(p.id, uint64(p.nchild)+uint64(k)<<56)
-	if reloadable && c.rt.reload {
-		// The same name in the next build of the same view (reload.go).
-		e.reloadID = mix(p.reloadID, uint64(p.nchild)+uint64(k)<<56)
-	}
+	// The same name in the next build of the same view (reload.go).
+	c.rt.reloadNamePlace(e, p, uint64(p.nchild)+uint64(k)<<56)
 	e.dir = p.dir &^ dirSet
 	keyed := c.keySet
 	if c.keySet {
 		e.id = keyedID(p.id, c.nextKey)
-		if reloadable && c.rt.reload {
-			e.reloadID = mix(p.reloadID, reloadKey(c.nextKey))
-		}
+		c.rt.reloadNameKey(e, p, c.nextKey)
 		e.key = c.nextKey
 		c.keySet, c.nextKey = false, nil
 	}
@@ -288,13 +284,7 @@ func (c *context) rekey(e *node, k any) {
 	if id != e.id {
 		rt.unlook(e.st)
 	}
-	if reloadable && rt.reload {
-		reloadParent := uint64(0)
-		if e.parent != nil {
-			reloadParent = e.parent.reloadID
-		}
-		e.reloadID = mix(reloadParent, reloadKey(k))
-	}
+	rt.reloadNameKey(e, e.parent, k)
 	st, built := rt.lookState(id)
 	if built && id != e.id {
 		// Another element of the pass has the key under the same parent.
@@ -836,21 +826,15 @@ type state struct {
 	// track is the ScrollState of the last frame's element, which events
 	// that scroll it update (scrollTo).
 	track *ScrollState
+	// stateReload names the element across a reload of mygo dev, and holds
+	// what a reload keeps of it until the element is built again (reload.go).
+	stateReload
 	// wheel is the notches of a mouse wheel on their way through the
 	// content (wheelScroll).
 	wheel *wheelGlide
 	// snap is where a container that snaps comes to rest (ScrollSnap),
 	// which its layout sets.
 	snap snapper
-	// reloadID names the element across a reload of mygo dev (reload.go),
-	// and what a reload keeps of it until the element is built again.
-	reloadID      uint64
-	reloadScroll  bool
-	reloadScrollX float64
-	reloadScrollY float64
-	reloadSel     bool
-	reloadCaret   int
-	reloadAnchor  int
 	// startX and startY are the offset before frame moveFrame moved it.
 	moveFrame      uint64
 	startX, startY float64

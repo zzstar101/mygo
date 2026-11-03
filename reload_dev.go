@@ -8,10 +8,13 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/internal/surface"
 )
 
 // reloadConn is the app's connection to mygo dev.
@@ -133,7 +136,7 @@ func captureDevReload() reloadPayload {
 	// What Save sets is the whole state of this build: a key it no longer
 	// sets is gone, so what the build before this one kept of code that
 	// changed does not live on.
-	if h := App.reloadHandlers(); h.Save != nil {
+	if h := reloadHandlers(); h.Save != nil {
 		s := &ReloadState{}
 		if err := h.Save(s); err != nil {
 			log.Printf("mygo: reload: Save: %v", err)
@@ -161,6 +164,11 @@ func captureReloadWindows() []reloadWindowState {
 		st.Maximized, st.FullScreen = w.native.IsMaximized(), w.native.IsFullScreen()
 		st.Visible = w.native.IsVisible()
 		st.Focused = windows.focused == w
+		if w.content == nil {
+			if u := w.native.URL(); u != "" && u != "about:blank" {
+				st.URL = u
+			}
+		}
 		if w.conn != nil && w.conn.ReloadSave != nil {
 			if data := w.conn.ReloadSave(); len(data) > 0 {
 				st.UI = data
@@ -215,4 +223,217 @@ func restoreReloadBounds(p *platform.WindowOptions, st reloadWindowState) {
 		}
 	}
 	p.Center = true
+}
+
+// reloadPayload is what the dev channel carries from one build to the
+// next.
+type reloadPayload struct {
+	// Windows are the app's windows, in creation order.
+	Windows []reloadWindowState `json:"windows,omitempty"`
+	// Values are the app's, by key.
+	Values map[string]json.RawMessage `json:"values,omitempty"`
+}
+
+// reloadWindowState is what a reload keeps of a window: where it was, and
+// what its content kept.
+type reloadWindowState struct {
+	// StateKey names the window, so that the build that starts next puts
+	// this state on the window it belongs to, wherever it is created.
+	StateKey   string          `json:"stateKey,omitempty"`
+	X          int             `json:"x"`
+	Y          int             `json:"y"`
+	Width      int             `json:"width"`
+	Height     int             `json:"height"`
+	Maximized  bool            `json:"maximized,omitempty"`
+	FullScreen bool            `json:"fullScreen,omitempty"`
+	Visible    bool            `json:"visible,omitempty"`
+	Focused    bool            `json:"focused,omitempty"`
+	URL        string          `json:"url,omitempty"` // the page of a web view
+	UI         json.RawMessage `json:"ui,omitempty"`
+}
+
+// reloadMessage is one message of the dev channel, one JSON object a line.
+type reloadMessage struct {
+	// Type is "hello", "state" or "prepare-reload".
+	Type string `json:"t"`
+	// PID identifies the build that says hello, so that the CLI knows the
+	// connection of the build it is running.
+	PID int `json:"pid,omitempty"`
+	// State is a reloadPayload.
+	State json.RawMessage `json:"state,omitempty"`
+}
+
+// devReload is the app's side of the dev channel: the connection to
+// mygo dev, which asks the running build for its state before it is
+// replaced, and hands it to the build that starts next.
+var devReload struct {
+	conn    reloadConn
+	sendMu  sync.Mutex // serializes writes to conn
+	mu      sync.Mutex
+	pulled  *reloadPayload // what the build before this one saved
+	claimed []bool         // which of pulled.Windows a window took
+	doing   bool           // the windows of a reload are being created
+	saved   bool           // this build handed its state over already
+
+	handlers ReloadHandlers // App.OnReload
+	// urls are the pages of the windows of the reload, until they load one.
+	urls map[*Window]string
+}
+
+// devSocketEnv tells an app of `mygo dev` where the dev channel listens.
+// Like MYGO_DEV, it is not meant for the processes the app starts.
+const devSocketEnv = "MYGO_DEV_SOCKET"
+
+// startReloadRestore calls the app's Restore with what the build before
+// this one left, and marks the windows the app creates when it becomes
+// ready as the reload's. Main thread only, called before the app's
+// WhenReady callbacks.
+//
+// A build that mygo dev did not launch has nothing to restore and is not
+// waiting for anything: its Restore never runs. The first build of a
+// mygo dev run has a channel, and runs Restore with nothing set, so an app
+// can tell by Keys that it is starting fresh.
+func startReloadRestore() {
+	if !devReloadable || devReload.conn == nil && devReload.pulled == nil {
+		return
+	}
+	p := devReload.pulled
+	devReload.doing = p != nil
+	if h := reloadHandlers(); h.Restore != nil {
+		var values map[string]json.RawMessage
+		if p != nil {
+			values = p.Values
+		}
+		if err := h.Restore(&ReloadState{values: values}); err != nil {
+			log.Printf("mygo: reload: Restore: %v", err)
+		}
+	}
+}
+
+// finishReloadRestore drops what this reload kept once the app's windows
+// are created: windows opened later are ordinary ones. Main thread only.
+func finishReloadRestore() {
+	devReload.doing = false
+	devReload.pulled = nil
+	devReload.claimed = nil
+	// A window that loaded no page by now loads what it decides, later.
+	devReload.urls = nil
+}
+
+// reloadWindowFor is the state the reload kept for a window created with
+// stateKey, if any is left for it. A flyout is not a window of the reload:
+// it is not kept, and does not take the state of one. Main thread only.
+//
+// A window takes the state of the window its StateKey names, so a build
+// that creates its windows in another order still puts each state on the
+// right window. A window without a StateKey takes the next state that has
+// none either, which is what a build that never names its windows has to
+// fall back on. A window the reload has no state for starts fresh: it is
+// not worth putting a state of some other window on it.
+func reloadWindowFor(stateKey string, isWindow bool) (reloadWindowState, bool) {
+	if !devReloadable || !devReload.doing || !isWindow {
+		return reloadWindowState{}, false
+	}
+	p := devReload.pulled
+	if p == nil {
+		return reloadWindowState{}, false
+	}
+	if devReload.claimed == nil {
+		devReload.claimed = make([]bool, len(p.Windows))
+	}
+	for i := range p.Windows {
+		if devReload.claimed[i] || p.Windows[i].StateKey != stateKey {
+			continue
+		}
+		devReload.claimed[i] = true
+		return p.Windows[i], true
+	}
+	return reloadWindowState{}, false
+}
+
+// reloadedWindow applies to w, created with opts, what the reload kept of
+// the window it replaced: what its content had, and that it is shown once
+// it drew the restored frames, so that a reload does not flash the window
+// it is replacing. Main thread only.
+func reloadedWindow(w *Window, opts *WindowOptions, st reloadWindowState) {
+	if len(st.UI) > 0 && w.conn != nil && w.conn.ReloadRestore != nil {
+		w.conn.ReloadRestore(st.UI)
+	}
+	if st.URL != "" {
+		if devReload.urls == nil {
+			devReload.urls = map[*Window]string{}
+		}
+		devReload.urls[w] = st.URL
+	}
+	if opts.Hidden || !st.Visible {
+		// The app keeps the window hidden, or the build before this one
+		// had hidden it: it stays hidden, and is not shown again.
+		opts.Hidden = true
+		return
+	}
+	if w.content == nil && opts.URL == "" {
+		// Nothing in the window presents a first frame, so nothing would
+		// show it again.
+		return
+	}
+	opts.Hidden = true
+	focused, shown := st.Focused, false
+	show := func() {
+		if shown {
+			return
+		}
+		shown = true
+		w.Show()
+		if focused {
+			w.Focus()
+		}
+	}
+	w.OnReadyToShow(show)
+	if w.content == nil {
+		// A page that fails to load is never ready to show: the window
+		// shows the failure, as it would have without the reload, rather
+		// than staying hidden with nothing to tell why.
+		w.onDidFailLoad.add(func(*LoadError) { show() }, false)
+	}
+}
+
+func setReloadHandlers(h ReloadHandlers) {
+	devReload.mu.Lock()
+	devReload.handlers = h
+	devReload.mu.Unlock()
+}
+
+func reloadHandlers() ReloadHandlers {
+	devReload.mu.Lock()
+	defer devReload.mu.Unlock()
+	return devReload.handlers
+}
+
+// attachReload tells a window's content whether a reload will ask for what it
+// holds.
+func attachReload(conn *surface.Conn) { conn.Reload = devReload.conn != nil }
+
+// resumeReload lets the app hand its state over again, after a relaunch that a
+// window canceled: what it handed as the quit began goes nowhere.
+func resumeReload() { devReload.saved = false }
+
+// reloadedURL returns the page to load for a window asked to load rawURL: the
+// page it showed before the reload, if it is of the same site, so that a restart
+// does not lose the place of a single page app. Asked once: what the app
+// loads after that is what the app wants.
+func reloadedURL(w *Window, resolved string) string {
+	saved, ok := devReload.urls[w]
+	if !ok {
+		return resolved
+	}
+	delete(devReload.urls, w)
+	a, err := url.Parse(saved)
+	if err != nil {
+		return resolved
+	}
+	b, err := url.Parse(resolved)
+	if err != nil || a.Scheme != b.Scheme || a.Host != b.Host {
+		return resolved
+	}
+	return saved
 }

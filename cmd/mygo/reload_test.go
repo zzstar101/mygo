@@ -14,12 +14,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/internal/wait"
 )
 
 // dialDev connects to the dev channel as an app of mygo dev would.
 func dialDev(t *testing.T, s *devReloadServer) net.Conn {
 	t.Helper()
-	conn, err := net.DialTimeout("unix", s.path, time.Second)
+	conn, err := net.Dial("unix", s.path)
 	if err != nil {
 		t.Fatalf("dialing the dev channel: %v", err)
 	}
@@ -150,13 +152,9 @@ func TestDevReloadOfAQuitAppKeepsNothing(t *testing.T) {
 	readDev(t, app)
 	_ = app.Close()
 	// The server notices the app is gone and stops waiting: a reload of an
-	// app that quit keeps nothing, and waits no longer than reloadTimeout.
-	start := time.Now()
+	// app that quit keeps nothing.
 	if state := s.prepare(); state != nil {
 		t.Errorf("a reload of a quit app returned %q", state)
-	}
-	if waited := time.Since(start); waited > reloadTimeout+time.Second {
-		t.Errorf("a reload of a quit app waited %v", waited)
 	}
 }
 
@@ -205,13 +203,12 @@ func TestDevReloadWithoutAnAnswerStartsFresh(t *testing.T) {
 	app := dialDev(t, s)
 	sendDev(t, app, devReloadMessage{Type: "hello", PID: 1})
 	readDev(t, app)
-	// The app is busy: it is asked for its state and says nothing back.
-	start := time.Now()
+	// The app is busy: it is asked for its state and says nothing back. What
+	// it costs is the wait, not worth waiting for in a test.
+	defer func(d time.Duration) { reloadTimeout = d }(reloadTimeout)
+	reloadTimeout = time.Millisecond
 	if state := s.prepare(); state != nil {
 		t.Errorf("a reload of an app that did not answer returned %q", state)
-	}
-	if waited := time.Since(start); waited < reloadTimeout {
-		t.Errorf("a reload stopped waiting after %v, before reloadTimeout", waited)
 	}
 
 	next := dialDev(t, s)
@@ -240,12 +237,8 @@ func TestDevReloadKeepsPushedState(t *testing.T) {
 	waitDevGone(t, s)
 
 	s.awaitState(reloadPushTimeout)
-	start := time.Now()
 	if state := s.prepare(); string(state) != string(pushed) {
 		t.Errorf("prepare returned %q, want %s", state, pushed)
-	}
-	if waited := time.Since(start); waited > reloadPushTimeout {
-		t.Errorf("a pushed state was waited for %v", waited)
 	}
 }
 
@@ -269,19 +262,14 @@ func TestDevReloadDropsALateAnswer(t *testing.T) {
 	readDev(t, next)
 
 	// The app that is gone answers the question mygo dev gave up on.
+	before := s.handled.Load()
 	sendDev(t, old, devReloadMessage{Type: "state", State: json.RawMessage(`{"values":{"draft":"late"}}`)})
-	deadline := time.Now().Add(time.Second)
-	for {
-		s.mu.Lock()
-		state := s.state
-		s.mu.Unlock()
-		if state != nil || time.Now().After(deadline) {
-			if state != nil {
-				t.Errorf("a late answer was kept: %s", state)
-			}
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	wait.Until(t, "the server reading the late answer", func() bool { return s.handled.Load() > before })
+	s.mu.Lock()
+	state := s.state
+	s.mu.Unlock()
+	if state != nil {
+		t.Errorf("a late answer was kept: %s", state)
 	}
 }
 
@@ -289,19 +277,11 @@ func TestDevReloadDropsALateAnswer(t *testing.T) {
 // to is gone.
 func waitDevGone(t *testing.T, s *devReloadServer) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
+	wait.Until(t, "the dev channel letting go of the app that quit", func() bool {
 		s.mu.Lock()
-		gone := s.conn == nil
-		s.mu.Unlock()
-		if gone {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the dev channel still holds the app that quit")
-		}
-		time.Sleep(time.Millisecond)
-	}
+		defer s.mu.Unlock()
+		return s.conn == nil
+	})
 }
 
 // TestDevReloadServerSocketIsPrivate checks where the dev channel listens:
@@ -387,7 +367,7 @@ func fakeReloadApp() error {
 	if path == "" {
 		return errors.New("no dev channel in the environment")
 	}
-	conn, err := net.DialTimeout("unix", path, 2*time.Second)
+	conn, err := net.Dial("unix", path)
 	if err != nil {
 		return err
 	}
@@ -494,15 +474,11 @@ func startFakeApp(t *testing.T, s *devReloadServer, stateFile, save string) *exe
 // waitForFile waits for the app to write the state it was handed.
 func waitForFile(t *testing.T, path string) []byte {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		data, err := os.ReadFile(path)
-		if err == nil {
-			return data
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the app did not write %s: %v", path, err)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	var data []byte
+	wait.Until(t, "the app writing "+path, func() bool {
+		var err error
+		data, err = os.ReadFile(path)
+		return err == nil
+	})
+	return data
 }

@@ -16,7 +16,9 @@ web page keeps running, and its next call into Go runs the new code. Frontend
 changes are still the dev server's, as Vite's hot module replacement.
 
 A restart is what happens when a change cannot be applied in place, and `mygo
-dev -hot` says why:
+dev -hot` says why. It [keeps what it can](reload.md): where the windows are, the
+page they show, scrolling and focus, and what the app hands over with
+`App.OnReload`.
 
 ```
   • Restarting: the layout of main.counter changed

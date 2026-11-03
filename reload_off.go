@@ -2,7 +2,10 @@
 
 package mygo
 
-import "github.com/egoist/mygo/internal/platform"
+import (
+	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/internal/surface"
+)
 
 // A browser build has no reload to hand state across: the page reloads by
 // itself (see `mygo dev -web`). A production build (the tag
@@ -13,8 +16,24 @@ import "github.com/egoist/mygo/internal/platform"
 // devReloadable tells whether this build can hand its state over at all.
 const devReloadable = false
 
-// reloadConn is absent in a browser build.
-type reloadConn = interface{}
+// reloadWindowState is empty: no window takes the state of another here.
+type reloadWindowState struct{}
+
+func setReloadHandlers(ReloadHandlers) {}
+
+func startReloadRestore() {}
+
+func finishReloadRestore() {}
+
+func reloadWindowFor(string, bool) (reloadWindowState, bool) { return reloadWindowState{}, false }
+
+func reloadedWindow(*Window, *WindowOptions, reloadWindowState) {}
+
+func attachReload(*surface.Conn) {}
+
+func resumeReload() {}
+
+func reloadedURL(_ *Window, resolved string) string { return resolved }
 
 func startDevReload() {}
 

@@ -623,11 +623,7 @@ func newWindow(opts WindowOptions, bg, tint *background, native uintptr, flyout 
 	// A reload puts the window where it was, which is more recent than the
 	// state saved under its key, and puts it on the window its state key
 	// names (a flyout is placed at its window or tray).
-	var reloadState reloadWindowState
-	reloaded := false
-	if devReloadable {
-		reloadState, reloaded = reloadWindowFor(w.stateKey, flyout == nil)
-	}
+	reloadState, reloaded := reloadWindowFor(w.stateKey, flyout == nil)
 	if reloaded {
 		restoreReloadBounds(popts, reloadState)
 	}
@@ -1500,7 +1496,7 @@ func (p *Page) LoadURL(rawURL string) error {
 	}
 	p.w.page(func(n platform.Window) {
 		p.w.html = nil
-		n.LoadURL(resolved)
+		n.LoadURL(reloadedURL(p.w, resolved))
 	})
 	return nil
 }

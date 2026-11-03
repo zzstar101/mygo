@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,7 +18,7 @@ import (
 // state over before it replaces it. The app saves on the main thread, so a
 // busy app takes a moment; past the timeout the reload goes on without the
 // state, as a reload always did.
-const reloadTimeout = 2 * time.Second
+var reloadTimeout = 2 * time.Second
 
 // reloadPushTimeout is how long mygo dev waits for the state an app pushes
 // as it starts itself again (App.Relaunch), which it cannot ask for: by
@@ -58,6 +59,8 @@ type devReloadServer struct {
 	// answered is closed when the running app sent its state, or its
 	// connection ended; nil when nothing is waiting.
 	answered chan struct{}
+	// handled counts the messages read, which tests wait on.
+	handled atomic.Int64
 }
 
 // startDevReloadServer listens for the app of mygo dev.
@@ -113,35 +116,40 @@ func (s *devReloadServer) serve(conn net.Conn) {
 			s.forget(conn)
 			return
 		}
-		var msg devReloadMessage
-		if json.Unmarshal(line, &msg) != nil {
-			continue
+		s.handle(conn, line)
+		s.handled.Add(1)
+	}
+}
+
+func (s *devReloadServer) handle(conn net.Conn, line []byte) {
+	var msg devReloadMessage
+	if json.Unmarshal(line, &msg) != nil {
+		return
+	}
+	switch msg.Type {
+	case "hello":
+		s.mu.Lock()
+		s.conn = conn
+		state := s.state
+		s.state = nil
+		s.mu.Unlock()
+		// The state of the build this one replaces, if it kept any.
+		s.write(conn, devReloadMessage{Type: "state", State: state})
+	case "state":
+		s.mu.Lock()
+		if s.answered == nil && s.conn != conn {
+			// An answer that came late, from an app a newer one
+			// replaced: the state of the build that is running now is
+			// what prepare asked of it.
+			s.mu.Unlock()
+			return
 		}
-		switch msg.Type {
-		case "hello":
-			s.mu.Lock()
-			s.conn = conn
-			state := s.state
-			s.state = nil
-			s.mu.Unlock()
-			// The state of the build this one replaces, if it kept any.
-			s.write(conn, devReloadMessage{Type: "state", State: state})
-		case "state":
-			s.mu.Lock()
-			if s.answered == nil && s.conn != conn {
-				// An answer that came late, from an app a newer one
-				// replaced: the state of the build that is running now is
-				// what prepare asked of it.
-				s.mu.Unlock()
-				continue
-			}
-			s.state = append([]byte(nil), msg.State...)
-			wait := s.answered
-			s.answered = nil
-			s.mu.Unlock()
-			if wait != nil {
-				close(wait)
-			}
+		s.state = append([]byte(nil), msg.State...)
+		wait := s.answered
+		s.answered = nil
+		s.mu.Unlock()
+		if wait != nil {
+			close(wait)
 		}
 	}
 }

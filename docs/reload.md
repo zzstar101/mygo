@@ -1,13 +1,12 @@
 # Reloading
 
-`mygo dev` watches the app's Go code and restarts it as you edit. It
-cannot keep the process: no platform lets a running Go program replace its
-own functions, and MyGo builds without cgo, so an app is not a set of
-plugins it could load again. A reload starts the app again instead — and
-hands what should not be lost from the build that quits to the build that
-starts.
+`mygo dev` restarts the app when it rebuilds it, and hands what should not
+be lost from the build that quits to the build that starts. That is every Go
+edit, or with [`mygo dev -hot`](hot-reload.md), which changes the running app
+in place and keeps everything, those it cannot apply that way, as a change to
+the fields of a struct.
 
-Three things survive a reload, each the business of whoever holds it:
+These survive a reload, each the business of whoever holds it:
 
 - MyGo keeps the [window](windows.md): where it was, its size, whether it
   was maximized, full screen or hidden, and whether it had the focus. A
@@ -22,6 +21,12 @@ Three things survive a reload, each the business of whoever holds it:
   container was scrolled, which element had the keyboard focus, and where
   the caret and the selection of the input the user was in were. That is
   [below](#what-package-ui-keeps).
+- Package ui keeps where a [router](ui/README.md) was too: its history and
+  the page it showed. An app that navigated in `Restore` knows better, and keeps
+  what it chose. Routers are told apart by the order they first show in, so
+  this holds when the edit changed what is around one.
+- A web view goes back to the page it showed, when the first page the new build
+  loads is of the same site, so a single page app keeps its place in its URL.
 - The app keeps its own state, its inputs and everything else, with
   `App.OnReload`: [below](#what-the-app-keeps).
 
@@ -124,11 +129,11 @@ is this in an app: a note and a counter that survive the reload.
 
 ## What a reload cannot keep
 
-- **A web page.** The state of a page is in the web content process, which
-  quits with the app. What lives in the app's profile is there again:
-  cookies, `localStorage`, IndexedDB and caches
+- **What a web page holds.** The state of a page is in the web content
+  process, which quits with the app. Its URL comes back, and what lives in the
+  app's profile is there again: cookies, `localStorage`, IndexedDB and caches
   ([browsing data](app.md#browsing-data)). A page that wants to survive a
-  reload puts what matters in storage.
+  reload puts what matters in storage, or use `mygo dev -hot`, which keeps it.
 - **Anything that is not a value.** `Save` hands over JSON, not handles: a
   file being written, a socket, a subprocess, a media position or a
   background job has to be reopened or restarted by the new build. Leave a

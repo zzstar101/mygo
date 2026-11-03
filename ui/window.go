@@ -80,13 +80,7 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	h := &windowHost{conn: conn}
 	rt := newRuntime(v.view, h)
 	h.rt = rt
-	if reloadable && conn.Reload {
-		// mygo dev launched this window with state handover: its elements
-		// are named so the next build finds them again (reload.go).
-		rt.reload = true
-		conn.ReloadSave = h.reloadSave
-		conn.ReloadRestore = h.reloadRestore
-	}
+	h.attachReload(conn)
 	conn.Event = h.event
 	conn.ThemeChanged = func() {
 		// The interface font is part of the appearance.

@@ -13,9 +13,10 @@ import (
 	"slices"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/internal/platform"
+
+	"github.com/egoist/mygo/internal/wait"
 )
 
 func TestReloadState(t *testing.T) {
@@ -281,24 +282,20 @@ func TestDevReloadConnectsToTheDevChannel(t *testing.T) {
 		t.Errorf("the app restored draft=%q", draft)
 	}
 
-	select {
-	case msg := <-saved:
-		if msg.Type != "state" {
-			t.Fatalf("the app answered with %q", msg.Type)
-		}
-		var payload reloadPayload
-		if err := json.Unmarshal(msg.State, &payload); err != nil {
-			t.Fatal(err)
-		}
-		var count int
-		if err := json.Unmarshal(payload.Values["count"], &count); err != nil || count != 7 {
-			t.Errorf("the app handed over count=%v (%v)", count, err)
-		}
-		if len(payload.Windows) != 0 {
-			t.Errorf("the app handed over %d windows, and it has none", len(payload.Windows))
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("mygo dev asked, and the app never answered")
+	msg := wait.For(t, "the app answering mygo dev", saved)
+	if msg.Type != "state" {
+		t.Fatalf("the app answered with %q", msg.Type)
+	}
+	var payload reloadPayload
+	if err := json.Unmarshal(msg.State, &payload); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := json.Unmarshal(payload.Values["count"], &count); err != nil || count != 7 {
+		t.Errorf("the app handed over count=%v (%v)", count, err)
+	}
+	if len(payload.Windows) != 0 {
+		t.Errorf("the app handed over %d windows, and it has none", len(payload.Windows))
 	}
 }
 
@@ -544,7 +541,7 @@ func TestReloadRelaunchSavesBeforeTheWindowsClose(t *testing.T) {
 			stopDevReload()
 			devReload.saved, devReload.pulled, devReload.doing, devReload.claimed = false, nil, false, nil
 			App.quitting, App.relaunch = false, false
-			cookieCalls.stopped = false
+			nativeCalls.stopped = false
 		})
 		App.OnReload(ReloadHandlers{})
 	})
@@ -634,13 +631,7 @@ func TestReloadRelaunchCancelledSavesAgain(t *testing.T) {
 	}()
 	next := func(what string) reloadMessage {
 		t.Helper()
-		select {
-		case msg := <-read:
-			return msg
-		case <-time.After(5 * time.Second):
-			t.Fatalf("the app did not hand its state over %s", what)
-			return reloadMessage{}
-		}
+		return wait.For(t, "the app handing its state over "+what, read)
 	}
 
 	// The window cancels the relaunch, after the app handed its state over.
@@ -737,4 +728,63 @@ func reloadTestSocketPath(t *testing.T, name string) string {
 	_ = os.Remove(path)
 	t.Cleanup(func() { _ = os.Remove(path) })
 	return path
+}
+
+// TestReloadKeepsThePage checks that a window of a web page goes back to the
+// page it showed, as a single page app's place is in its URL, and only for the
+// first page it loads of the same site.
+func TestReloadKeepsThePage(t *testing.T) {
+	const page = "http://localhost:5173/settings/keys?tab=2#top"
+	load := func(saved, asked string) string {
+		var got string
+		onMain(func() {
+			w := &Window{}
+			devReload.urls = map[*Window]string{w: saved}
+			got = reloadedURL(w, asked)
+			if again := reloadedURL(w, "http://localhost:5173/other"); again != "http://localhost:5173/other" {
+				t.Errorf("a second load went to %q", again)
+			}
+			devReload.urls = nil
+		})
+		return got
+	}
+	if got := load(page, "http://localhost:5173/"); got != page {
+		t.Errorf("the same site loaded %q, want the page it showed", got)
+	}
+	if got := load(page, "https://example.com/"); got != "https://example.com/" {
+		t.Errorf("another site loaded %q", got)
+	}
+
+	// A window saves the page it shows, and loads it in the next build.
+	w, fw := testWindow(t, WindowOptions{StateKey: "reload-page"})
+	if err := w.Page().LoadURL(page); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		onMain(func() { devReload.pulled, devReload.doing, devReload.claimed, devReload.urls = nil, false, nil, nil })
+	})
+	var saved []reloadWindowState
+	onMain(func() { saved = captureReloadWindows() })
+	var st reloadWindowState
+	for _, s := range saved {
+		if s.StateKey == "reload-page" {
+			st = s
+		}
+	}
+	if st.URL != page {
+		t.Fatalf("saved %q as the page", st.URL)
+	}
+	onMain(func() {
+		devReload.pulled = &reloadPayload{Windows: []reloadWindowState{st}}
+		devReload.doing = true
+	})
+	next, nfw := testWindow(t, WindowOptions{StateKey: "reload-page"})
+	if err := next.Page().LoadURL("http://localhost:5173/"); err != nil {
+		t.Fatal(err)
+	}
+	onMain(func() {})
+	if got := nfw.URL(); got != page {
+		t.Errorf("the next build loaded %q", got)
+	}
+	_ = fw
 }

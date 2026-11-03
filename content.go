@@ -34,7 +34,6 @@ func (w *Window) attachContent(content Content) {
 	w.conn = &surface.Conn{
 		Surface:        s,
 		Window:         w,
-		Reload:         devReloadable && devReload.conn != nil,
 		Clipboard:      backend().Clipboard(),
 		StartDataDrag:  w.startDataDrag,
 		CancelDataDrag: w.cancelDataDrag,
@@ -103,6 +102,7 @@ func (w *Window) attachContent(content Content) {
 	if f := w.fit; f != nil && f.native != nil && w.flyout != nil {
 		f.native(w, w.conn)
 	}
+	attachReload(w.conn)
 	content.AttachContent(w.conn)
 }
 

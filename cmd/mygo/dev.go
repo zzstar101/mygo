@@ -40,6 +40,10 @@ such as Accessibility, Screen Recording or reading its Keychain items; ad
 hoc signatures, which it falls back to without one, change with every
 build. -sign signs with another identity; -sign - signs ad hoc.
 
+Relaunching hands what should not be lost to the next build: where the windows
+are, the page they show, scrolling and focus, and what the app says with
+App.OnReload. -no-reload-state starts every build fresh.
+
 With -hot, saving Go code changes the running app in place, in about a tenth of a
 second: its windows, web pages and memory stay. What that cannot carry, as a
 struct that changed its layout, and changes to mygo.json or mygo.config.ts, the

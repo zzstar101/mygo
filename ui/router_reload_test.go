@@ -142,3 +142,53 @@ func TestReloadKeepsTheFocusOnThePage(t *testing.T) {
 		t.Errorf("after a reload the page the user was on has no focus")
 	}
 }
+
+// TestReloadKeepsTheRoute: a restart comes back to the page the app was on,
+// with the history it had, wherever the router is in the view now, and without
+// an app doing anything for it.
+func TestReloadKeepsTheRoute(t *testing.T) {
+	view := func(r *Router, around bool) func(c *context) {
+		return func(c *context) {
+			if around {
+				coreText(c, "An edit added this above the router")
+			}
+			r.coreView(c, func(rt *Route) { coreText(c, "Page "+rt.Path()) })
+		}
+	}
+	r1 := NewRouter("/a")
+	r1.Transition = TransitionNone
+	tt := reloadTester(view(r1, false), 400, 300, nil)
+	r1.Push("/b")
+	r1.Push("/c")
+	r1.Back()
+	tt.Frame()
+	blob := tt.rt.reloadSave()
+
+	r2 := NewRouter("/a")
+	r2.Transition = TransitionNone
+	next := reloadTester(view(r2, true), 400, 300, blob)
+	if got := r2.Path(); got != "/b" {
+		t.Fatalf("the next build shows %q", got)
+	}
+	if !next.HasText("Page /b") {
+		t.Error("the next build does not show the page")
+	}
+	r2.Back()
+	if got := r2.Path(); got != "/a" {
+		t.Errorf("Back went to %q", got)
+	}
+	r2.Forward()
+	r2.Forward()
+	if got := r2.Path(); got != "/c" {
+		t.Errorf("Forward went to %q", got)
+	}
+
+	// An app that navigated as it restored its own state knows better.
+	r3 := NewRouter("/a")
+	r3.Transition = TransitionNone
+	r3.Push("/mine")
+	reloadTester(view(r3, false), 400, 300, blob)
+	if got := r3.Path(); got != "/mine" {
+		t.Errorf("the app's own route became %q", got)
+	}
+}

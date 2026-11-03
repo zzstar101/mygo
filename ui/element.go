@@ -337,18 +337,16 @@ type node struct {
 	valueInput func(*node)
 	c          *context
 	id         uint64
-	// reloadID names the element across a reload of mygo dev: same view,
-	// same ID (see reload.go).
-	reloadID uint64
-	kind     kind
-	flags    uint32
-	parent   *node
-	first    *node
-	last     *node
-	next     *node
-	nchild   int
-	depth    int
-	st       *state
+	// nodeReload names the element across a reload of mygo dev (reload.go).
+	nodeReload
+	flags  uint32
+	parent *node
+	first  *node
+	last   *node
+	next   *node
+	nchild int
+	depth  int
+	st     *state
 	// track is the ScrollState of a scroll container (TrackScroll).
 	track *ScrollState
 

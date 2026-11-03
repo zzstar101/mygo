@@ -5,7 +5,6 @@ import (
 	"path"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -442,42 +441,6 @@ func (r *Route) Match(pattern string) bool {
 	return true
 }
 
-// namePage names the page after the parts of the path it shows, the ones
-// of the page itself and of the layouts around it, so that a build that
-// restores the route names the page as the build that quit did, and the
-// elements inside keep their state through a reload of mygo dev. The
-// number of a page in the history cannot name it: a build that starts on
-// another route numbers its pages differently. parts is how many parts of
-// the path the page shows, the whole path at first, then what a {name...}
-// of a layout takes.
-func (r *Route) namePage(parts int) {
-	pg := r.page
-	if !reloadable || pg == nil || r.router == nil || r.router.rt == nil || !r.router.rt.reload {
-		// Only a window mygo dev launched with state handover names its
-		// elements across builds: other apps do not parse the path of
-		// every page in every frame for it.
-		return
-	}
-	segments := segmentsOf(r.entry.loc)
-	if parts < 0 || parts > len(segments) {
-		parts = len(segments)
-	}
-	var parent uint64
-	if pg.parent != nil {
-		parent = pg.parent.reloadID
-	}
-	key := "page:" + strconv.Itoa(r.level) + ":" + strings.Join(segments[:parts], "/")
-	pg.reloadID = mix(parent, reloadKey(key))
-	if pg.st != nil {
-		// The page was born under the number the router gave it: its own
-		// state is kept under the name it shows, as its elements are.
-		pg.st.reloadID = pg.reloadID
-	}
-	if rt := r.router.rt; rt.reloadApply != nil {
-		rt.reloadAt(pg)
-	}
-}
-
 // Param returns what the wildcard name of the pattern Match last matched
 // took, unescaped, or of a layout's around, "" if none has it.
 func (r *Route) Param(name string) string {
@@ -552,6 +515,7 @@ func (r *Route) coreView(c *context, fn func(r *Route)) *node {
 // going away too, which takes neither the pointer nor the keyboard.
 func (r *Router) coreView(c *context, fn func(r *Route)) *node {
 	r.rt = c.rt
+	c.rt.reloadRouter(r)
 	if browserHistory != nil {
 		browserHistory.claim(r)
 	}

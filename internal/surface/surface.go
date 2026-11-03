@@ -75,16 +75,9 @@ type Conn struct {
 	// Ready tells that the content presented its first frame: the window
 	// is ready to show (Window.OnReadyToShow).
 	Ready func()
-	// Reload tells that mygo dev launched the window with state
-	// handover: the content then names its elements so that the next
-	// build finds their state again.
-	Reload bool
-	// ReloadSave returns what the content keeps across a reload of
-	// `mygo dev`, and ReloadRestore gives it back before the window's
-	// first frame. The framework calls them on the main thread, and they
-	// are nil for a content that keeps nothing (package ui sets them).
-	ReloadSave    func() []byte
-	ReloadRestore func([]byte)
+	// ConnReload is what a restart of `mygo dev` needs of the content, which
+	// production builds leave out.
+	ConnReload
 	// PopupMenu shows m as a context menu at (x, y) in the surface, in
 	// DIPs, once the event being handled returns. chosen receives the ID of
 	// the item chosen, if one is.

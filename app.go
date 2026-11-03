@@ -89,10 +89,6 @@ type Application struct {
 	onWindowCreated   listeners[func(*Window)]
 
 	onNotificationClick listeners[func(string)]
-
-	// reload is OnReload: what the app hands from one `mygo dev` build to
-	// the next.
-	reload ReloadHandlers
 }
 
 // App is the application singleton.
