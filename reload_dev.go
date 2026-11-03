@@ -26,7 +26,7 @@ const devReloadable = true
 
 // startDevReload connects to mygo dev, unless this build was not launched
 // with state handover: no MYGO_DEV_SOCKET (a production build, another
-// launcher, or --no-reload-state), or the browser, which has no reload to
+// launcher, or mygo dev without -hot), or the browser, which has no reload to
 // keep state across (its page reloads by itself).
 func startDevReload() {
 	path := os.Getenv(devSocketEnv)

@@ -40,17 +40,15 @@ such as Accessibility, Screen Recording or reading its Keychain items; ad
 hoc signatures, which it falls back to without one, change with every
 build. -sign signs with another identity; -sign - signs ad hoc.
 
-Relaunching hands what should not be lost to the next build: where the windows
-are, the page they show, scrolling and focus, and what the app says with
-App.OnReload. -no-reload-state starts every build fresh.
+Changes to Go code, configuration, icons, resources or message catalogs rebuild
+and relaunch the app. A compile error leaves the previous build running.
+Frontend changes are left to the dev server. Quitting the app ends mygo dev.
 
 With -hot, saving Go code changes the running app in place, in about a tenth of a
 second: its windows, web pages and memory stay. What that cannot carry, as a
-struct that changed its layout, and changes to mygo.json or mygo.config.ts, the
-icon, the resources or the catalogs of messages rebuild the app, regenerate the
-TypeScript client and the accessors of the catalogs, and relaunch it. A build
-that fails to compile keeps the previous one running; the next change tries
-again. Frontend changes are left to the dev server. Quitting the app ends mygo dev.
+struct that changed its layout, rebuilds and relaunches it as above, handing the
+next build what should not be lost: where the windows are, the page they show,
+scrolling and focus, and what the app says with App.OnReload.
 
 On a terminal, type r and Enter to rebuild and restart the app, c to clear
 the console, q to quit, h for help.
@@ -71,7 +69,6 @@ keep it: the app's own setting is left as it is.`)
 	openPage := flags.Bool("open", true, "with -web, open the app in the browser")
 	lang := flags.String("lang", "", "run the app in this language (as de, or the pseudo locales en-XA and ar-XB), without keeping it")
 	hot := flags.Bool("hot", false, "change the code of the running app on save, restarting it only when that cannot be done")
-	noReloadState := flags.Bool("no-reload-state", false, "let the app start fresh on every rebuild, without the state of the build it replaces")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -95,22 +92,19 @@ keep it: the app's own setting is left as it is.`)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	// The dev channel the app hands its state over on, before it is
-	// replaced and after it starts again. Without it, a rebuild starts a
-	// fresh app, as it always did.
-	var reload *devReloadServer
-	if !*noReloadState {
-		reload, err = startDevReloadServer()
-		if err != nil {
-			warnf("Reloading without the app's state: %v", err)
-			reload = nil
-		} else {
-			defer reload.close()
-		}
-	}
-	s := &devSession{root: c.root, sign: devSign(c, *sign), name: devConfig(c).Name, env: []string{"MYGO_ENV=development"}, reload: reload}
+	s := &devSession{root: c.root, sign: devSign(c, *sign), name: devConfig(c).Name, env: []string{"MYGO_ENV=development"}}
 	if *hot {
 		s.hotBuild = newHotBuild(c)
+		// The dev channel the app hands its state over on, before it is
+		// replaced and after it starts again: what -hot cannot apply in place
+		// restarts the app, which should not lose its place for it. This
+		// holds where -hot only ever restarts too.
+		if reload, err := startDevReloadServer(); err != nil {
+			warnf("Restarting without the app's state: %v", err)
+		} else {
+			s.reload = reload
+			defer reload.close()
+		}
 	}
 	if locale != "" {
 		// The app reads it as it starts, over the language it keeps.
@@ -267,7 +261,8 @@ type devSession struct {
 	// build began.
 	inputs *buildInputs
 	stamp  map[string]string
-	// reload is the dev channel to the app, or nil with --no-reload-state.
+
+	// reload is the dev channel to the app, nil without -hot.
 	reload *devReloadServer
 
 	// live is app, which a build stops before it starts.
@@ -886,16 +881,21 @@ func (s *devSession) icon(c *Config) ([]byte, error) {
 	return s.icns, nil
 }
 
-// reloadEnv is the dev channel in the environment of the app. A session
-// without one, as mygo dev --no-reload-state, says so in the same variable:
-// the app then neither saves nor restores, and every rebuild starts fresh,
-// even when a MYGO_DEV_SOCKET of something else is in the environment.
+// appEnviron is the environment of mygo dev for the app, without a dev channel
+// it inherited from a session around this one, which is not this app's.
+func appEnviron() []string {
+	return slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, devReloadEnv+"=")
+	})
+}
+
+// reloadEnv is the dev channel in the environment of the app, none without
+// -hot: the app then neither saves nor restores.
 func (s *devSession) reloadEnv() []string {
-	path := ""
-	if s.reload != nil {
-		path = s.reload.path
+	if s.reload == nil {
+		return nil
 	}
-	return []string{devReloadEnv + "=" + path}
+	return []string{devReloadEnv + "=" + s.reload.path}
 }
 
 // launch starts a build. MYGO_DEV=1 tells it that mygo dev runs it, which
@@ -920,7 +920,7 @@ func (s *devSession) launch(exe string) (*devProcess, error) {
 	cmd := exec.Command(exe)
 	cmd.Dir = s.root
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	cmd.Env = append(append(os.Environ(), s.env...), "MYGO_DEV=1")
+	cmd.Env = append(append(appEnviron(), s.env...), "MYGO_DEV=1")
 	if hot != nil {
 		cmd.Env = append(cmd.Env, "MYGO_HOT="+hot.addr())
 	}

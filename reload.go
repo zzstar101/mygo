@@ -6,8 +6,8 @@ import (
 	"sort"
 )
 
-// ReloadHandlers are what an app hands from one build of `mygo dev` to the
-// next, for App.OnReload.
+// ReloadHandlers are what an app hands from one build of `mygo dev -hot` to
+// the next as it restarts, for App.OnReload.
 //
 // Save runs on the main thread before the running build quits, in the dev
 // output when it fails: put what should survive the reload into s. What
@@ -69,7 +69,7 @@ func (s *ReloadState) Keys() []string {
 	return keys
 }
 
-// OnReload registers what an app keeps across a reload of `mygo dev`: the
+// OnReload registers what an app keeps across a restart of `mygo dev -hot`: the
 // window is replaced and the process starts again, and Save hands what
 // should survive to Restore, which runs before the first window of the
 // new build.
@@ -83,7 +83,7 @@ func (s *ReloadState) Keys() []string {
 // native UI elements itself, and the window is shown once it draws the
 // restored state, so a reload does not flash an empty window.
 //
-// Outside `mygo dev` the handlers are never called: nothing is listening
+// Outside `mygo dev -hot` the handlers are never called: nothing is listening
 // for a reload, so the app neither saves nor restores anything. A build of
 // `mygo build` is marked production, which keeps it from even dialing a
 // dev channel, and the app it ships never hands its state to anything.

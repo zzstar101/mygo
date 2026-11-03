@@ -118,10 +118,11 @@ On Windows, a state also keeps the window's bounds in the screen's pixels
 (`PixelX`, `PixelY`, `PixelWidth`, `PixelHeight`): where displays have
 different scales, its position in DIPs changes with the scales, and
 earlier versions' cannot tell the displays apart.
-A [reload](reload.md) of `mygo dev` keeps a window's place as well, without
+
+A [restart](reload.md) of `mygo dev -hot` keeps a window's place as well, without
 a `StateKey` and without writing anything: where the window was, whether it
 was showing and whether it had the focus is handed to the build that
-replaces it, so a reload does not move the window it is rebuilding.
+replaces it, so a restart does not move the window it is rebuilding.
 
 An app that keeps its data elsewhere, such as in its own database, keeps
 the states there with a `WindowStateStore`, set before the first window

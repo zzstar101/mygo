@@ -1,8 +1,8 @@
-// Reload-state is a note that outlives the rebuild of `mygo dev`: the
+// Reload-state is a note that outlives a restart of `mygo dev -hot`: the
 // process starts again, and what you typed, the counter and the window come
 // back with it.
 //
-//	go run ./cmd/mygo dev examples/reload-state
+//	go run ./cmd/mygo dev -hot examples/reload-state
 package main
 
 import (

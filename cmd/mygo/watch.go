@@ -339,7 +339,9 @@ func (w *watcher) watch(ctx context.Context, interval time.Duration) <-chan []st
 				last, settling = cur, false
 				clear(changed)
 				settle = nil
-				notices.sync(in.notified(cur), nil)
+				if w.notify {
+					notices.sync(in.notified(cur), nil)
+				}
 			case !maps.Equal(cur, last):
 				var moved []string
 				for p, v := range cur {
@@ -357,8 +359,8 @@ func (w *watcher) watch(ctx context.Context, interval time.Duration) <-chan []st
 				last, settling = cur, true
 				if w.notify {
 					settle = time.After(settleAfter)
+					notices.sync(in.notified(cur), moved)
 				}
-				notices.sync(in.notified(cur), moved)
 			case woken && settling:
 				// Another notice of what it saw: it settles by the timer.
 			case settling:

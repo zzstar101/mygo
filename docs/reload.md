@@ -1,10 +1,10 @@
 # Reloading
 
-`mygo dev` restarts the app when it rebuilds it, and hands what should not
-be lost from the build that quits to the build that starts. That is every Go
-edit, or with [`mygo dev -hot`](hot-reload.md), which changes the running app
-in place and keeps everything, those it cannot apply that way, as a change to
-the fields of a struct.
+[`mygo dev -hot`](hot-reload.md) changes the running app in place when it can,
+and keeps everything. When it has to restart the app, as for a change to the
+fields of a struct, it hands what should not be lost from the build that quits to
+the build that starts. Plain `mygo dev` hands nothing over: every build starts
+fresh.
 
 These survive a reload, each the business of whoever holds it:
 
@@ -32,8 +32,8 @@ These survive a reload, each the business of whoever holds it:
 
 Nothing is written to disk: the state lives in `mygo dev`'s memory for the
 moment between the two builds, and the channel it travels on belongs to
-that one session, so two `mygo dev` runs on the same project never mix
-their apps. An app started by hand, a `mygo dev` started again, or a build
+that one session, so two `mygo dev -hot` runs on the same project never mix
+their apps. An app started by hand, a `mygo dev -hot` started again, or a build
 that fails to compile and leaves the old one running — none of them is
 handed a state it did not just make.
 
@@ -133,7 +133,7 @@ is this in an app: a note and a counter that survive the reload.
   process, which quits with the app. Its URL comes back, and what lives in the
   app's profile is there again: cookies, `localStorage`, IndexedDB and caches
   ([browsing data](app.md#browsing-data)). A page that wants to survive a
-  reload puts what matters in storage. `mygo dev -hot` keeps it, for the changes it can apply.
+  reload puts what matters in storage. A change applied in place keeps it.
 - **Anything that is not a value.** `Save` hands over JSON, not handles: a
   file being written, a socket, a subprocess, a media position or a
   background job has to be reopened or restarted by the new build. Leave a
@@ -141,11 +141,8 @@ is this in an app: a note and a counter that survive the reload.
 - **Browsers.** `mygo dev -web` reloads the page, which is the browser's
   own hot reload: there is no process of ours to hand a state to.
 
-## Turning it off
+## Production builds
 
-`mygo dev -no-reload-state` starts every build fresh, as a reload before
-this one did: the app is handed nothing, the handlers do not run, and what
-package ui keeps is dropped. It is a development flag, like every flag of
-`mygo dev`; `mygo build` marks its builds production, and the app it ships
-never looks for a dev channel at all: like the inspector of native UI, the
-handover is left out of its binary.
+`mygo build` marks its builds production, and the app it ships never looks for a
+dev channel at all: like the inspector of native UI, the handover is left out of
+its binary. `App.OnReload` compiles, and its handlers are never called.

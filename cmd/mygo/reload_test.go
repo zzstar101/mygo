@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -331,20 +332,21 @@ func TestDevReloadServerSocketIsPrivate(t *testing.T) {
 	}
 }
 
-// TestDevLaunchWithoutReloadState checks that a session without a dev
-// channel, as mygo dev --no-reload-state, tells the app of no channel: it
-// neither saves nor restores, and every rebuild starts a fresh app.
-func TestDevLaunchWithoutReloadState(t *testing.T) {
-	// The environment of mygo dev itself may hold the socket of another
-	// session: the app it starts is told of no channel all the same.
+// TestReloadEnvOnlyWithHot checks that plain mygo dev says nothing of a dev
+// channel: only -hot has one, so an app it starts neither saves nor restores.
+func TestReloadEnvOnlyWithHot(t *testing.T) {
+	// One inherited from a session around this one is not this app's.
 	t.Setenv(devReloadEnv, "/tmp/elsewhere.sock")
-	s := &devSession{root: t.TempDir()}
-	if got := s.reloadEnv(); len(got) != 1 || got[0] != devReloadEnv+"=" {
-		t.Errorf("a session without a dev channel told the app %v", got)
+	if slices.ContainsFunc(appEnviron(), func(kv string) bool { return strings.HasPrefix(kv, devReloadEnv+"=") }) {
+		t.Error("the app inherits a dev channel")
+	}
+	s := &devSession{}
+	if got := s.reloadEnv(); got != nil {
+		t.Errorf("without -hot, the app's environment gets %q", got)
 	}
 	s.reload = &devReloadServer{path: "/tmp/some.sock"}
 	if got := s.reloadEnv(); len(got) != 1 || got[0] != devReloadEnv+"=/tmp/some.sock" {
-		t.Errorf("the dev channel of the app's environment is %v", got)
+		t.Errorf("with -hot, the app's environment gets %q", got)
 	}
 }
 

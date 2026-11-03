@@ -700,7 +700,7 @@ func TestDevReloadDoesNotConnectInProduction(t *testing.T) {
 }
 
 // TestDevReloadWithoutAChannel checks that a build told of an empty
-// MYGO_DEV_SOCKET, as mygo dev --no-reload-state starts it, dials nothing.
+// MYGO_DEV_SOCKET, as plain mygo dev starts it, dials nothing.
 func TestDevReloadWithoutAChannel(t *testing.T) {
 	t.Cleanup(func() {
 		onMain(func() {

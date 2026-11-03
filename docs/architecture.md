@@ -73,7 +73,7 @@ framework safely. Read it before changing anything under `internal/`.
 ├── events.go           listener lists and the Preventable event types
 ├── single_instance.go  RequestSingleInstanceLock over a Unix socket
 ├── dev.go signal_*.go  IsDev, the `mygo dev` ready signal, quitting on SIGINT/SIGTERM
-├── reload*.go          what a build of `mygo dev` hands the build that replaces it
+├── reload*.go          what a build of `mygo dev -hot` hands the build that replaces it
 ├── backend_*.go        picks the backend per GOOS
 ├── internal/
 │   ├── platform/       the contract every backend implements
@@ -5276,12 +5276,8 @@ renderer's (`gputest.Compare`).
     end the processes it started; those left after it exits are killed. A
     build that fails to compile leaves the old one running; one that fails
     to start leaves none until the next change.
-  - *Noticing.* With `-hot`, the watcher also looks when the system tells of
-    a change. Polling stays the source of truth of what changed: a
-    notifier (`notify_*.go`: kqueue on the files on macOS, inotify on the
-    directories on Linux, `ReadDirectoryChangesW` on Windows) only says
-    when to look, and a change counts once it holds still for 15 ms.
-    Before the running build is asked to quit, it is asked for its state:
+    With `-hot`, before the running build is asked to quit, it is asked for
+    its state:
     the app connects at startup to a socket `mygo dev` listens on in the
     per-user runtime directory (`mygo-dev-<uid>-<nonce>.sock`, mode 0600,
     named `MYGO_DEV_SOCKET` in the environment, unset at once so the
@@ -5315,7 +5311,6 @@ renderer's (`gputest.Compare`).
     processes, unlike `keyedID`'s per-process seed), which a reload applies
     as the elements are created in its first frame and drops for an element
     that moved. The text of an input is the app's own state, which
-    `App.OnReload` brings back.
     `App.OnReload` brings back. A router's history comes back by the order
     routers first show in (`engine.reloadRouter`), since the edit that needs a
     restart often changes what is around one, and a web view's page with
