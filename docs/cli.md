@@ -99,7 +99,10 @@ Develops the app with live reload. It writes the TypeScript client, runs
 place of its built frontend, and starts it. Without `devUrl` the app serves
 `frontendDist` from disk.
 
-Changes to the Go code, the configuration, the icon, the resources or the
+Saving Go code [changes the running app in place](hot-reload.md), usually in
+about a tenth of a second: its windows, web pages and memory stay. A change that
+cannot be applied that way, such as to the fields of a struct, and changes to the
+configuration, the icon, the resources or the
 [catalogs](i18n.md) rebuild the app, regenerate the TypeScript client and
 the functions of the catalogs, and restart the app: the running
 build quits, then the new one starts, so the two never hold the same files,
@@ -145,6 +148,7 @@ compiles. `o` opens the page again.
 | Flag | |
 |---|---|
 | `-skip-dev-command` | does not run `devCommand`, e.g. when the dev server already runs |
+| `-no-hot` | restarts the app on every change, instead of changing its code as it runs |
 | `-sign` | the identity that signs the development app on macOS (default: an Apple Development identity, see below, else `-`, ad hoc) |
 | `-web` | develops the app in browsers |
 | `-port` | with `-web`, the port to serve the app at, or the next free one (default: 5174) |

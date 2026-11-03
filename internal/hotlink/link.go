@@ -787,7 +787,8 @@ func (s *Session) Link(list []Compiled) (*hotpatch.Patch, error) {
 	for _, c := range list {
 		compiled[c.Key] = c.Objs
 	}
-	l := &linker{s: s, placed: map[string]*placed{}, replaced: map[string]bool{}, changedRO: map[string]bool{}}
+	l := &linker{s: s, placed: map[string]*placed{}, replaced: map[string]bool{}, changedRO: map[string]bool{},
+		heapItabs: map[[2]uint64]uint64{}, far: map[uint64]uint64{}}
 	for pkg := range compiled {
 		if s.running[pkg] == nil {
 			return nil, refuse("%s is new to the running build", pkg)

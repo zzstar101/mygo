@@ -5264,7 +5264,10 @@ renderer's (`gputest.Compare`).
     has `mygo dev` start the same build again. Production builds ignore it.
     A build counts as started once its process is: one that crashes on
     start is reported as it exits.
-  - *Reload.* A change (polling every 250 ms, debounced) rebuilds;
+  - *Hot reload.* A save first goes to the running app (see "Hot reload"
+    below); what that refuses rebuilds and restarts.
+  - *Reload.* A change (polling every 250 ms, and at once when the system
+    tells of one, debounced) rebuilds;
     when the executable, Info.plist and icon are unchanged nothing restarts.
     Otherwise the running build is sent SIGTERM (quit sequence), then
     SIGKILL after 3 s, and the new one starts once it has exited: builds
@@ -5273,6 +5276,10 @@ renderer's (`gputest.Compare`).
     end the processes it started; those left after it exits are killed. A
     build that fails to compile leaves the old one running; one that fails
     to start leaves none until the next change.
+  - *Noticing.* Polling stays the source of truth of what changed: a
+    notifier (`notify_*.go`: kqueue on the files on macOS, inotify on the
+    directories on Linux, `ReadDirectoryChangesW` on Windows) only says
+    when to look, and a change counts once it holds still for 15 ms.
   - *Watching.* Exactly what the build reads, from `go list -deps` after
     every build: the directories of the compiled packages outside GOROOT and
     the module cache (so local `replace` modules too), embedded files,
@@ -5496,6 +5503,79 @@ identity, entitlements of the app and of helpers, DMG title, notarization
 profile).
 
 <!-- repository-only:start -->
+
+## Hot reload (`internal/hotlink`, `internal/hotpatch`)
+
+A save reaches the running app without a restart, so what it holds stays. Go has
+no way to load code without cgo (`plugin` needs it, and does not exist on
+Windows), so MyGo links what changed itself, and the runtime takes the result
+as it takes a plugin. It is the design of incremental linkers for native code:
+a thin link against the running image, and a fallback to restarting.
+
+```
+ save ─► compile the package ─► diff objects ─► thin link ─► map, register, jump
+          (cmd/compile, 50 ms)   hotlink         hotlink       hotpatch, in the app
+```
+
+- **Only development builds have it.** `mygo dev` builds with the tag `mygo_hot`,
+  which links `hot_on.go` and `internal/hotpatch`, and no inlining in the app's
+  packages (`-gcflags=<module>/...=-l`), so that a function's callers hold no
+  copy of it and an edit recompiles one package. Nothing reaches other builds:
+  apps measure the same to the byte. `hotpatch.region`, 64 MB of `.noptrbss`,
+  is where patches go: within the image, because `BL` on arm64 reaches 128 MB
+  and the system fills the memory around an image before Go starts.
+- **Compiling.** `hotlink.Compiler` runs `cmd/compile` directly, with what `go
+  list -deps -export -json` said and the flags `go build` gives (`-shared` where
+  PIE is the default). It skips the go command's 150 ms and the link's 250 ms.
+  Objects refer to other packages' symbols by index, so a package whose export
+  data changed recompiles what imports it (`CompileChanged`); `go list` and the
+  stamp of the inputs from the build's start (`hotReloader.start`) make sure the
+  baseline is what the running build was made from.
+- **Diffing.** `fingerprints` hashes a symbol's bytes, relocations and what the
+  runtime reads, but not line tables, so a comment above a function replaces
+  nothing. What the object alone owns (closures, static data) counts by content,
+  since the compiler's numbers for them move with any edit. `..typeAssert.N` and
+  `..interfaceSwitch.N` are numbered per package, so a name says nothing of what
+  they are: they are always carried, and never resolved by name.
+- **Refusing.** `Refusal` asks for a restart: a type's layout (`checkType`: size,
+  pointer bytes, kind, field offsets, what its fields are), its exported methods,
+  `main`, package initialization, a new package. Unexported methods may come and
+  go, and types keep the program's descriptor then.
+- **Linking.** Symbols resolve to, in order: this patch; a previous patch
+  (`latest`); the executable. What is in none is carried, from the archives of the
+  build: functions the program's linker dropped, new variables. Strings, stack
+  maps and other content addressed data are carried too, and `runtime.gcbits.*`
+  always, because a stack object's mask is found from its function's module.
+- **Identity.** One program has one descriptor of a type and one itab of a pair:
+  `==` on types, type switches and interface assertions compare pointers.
+  Types are matched by hash and string. Symbol tables omit them, so `host.go`
+  walks the typelink descriptors, the itabs, and all they point to; what only
+  code refers to is read back from the instruction that does, through the object's
+  relocations (`typeInCode`). Itabs come from the executable's table or, for
+  those a conversion made as the app ran, are asked of the app (`findItab`), which
+  live on the heap, beyond what `ADRP`/`LEA` reaches: such code is rewritten to
+  load from a slot, as a GOT does. A patch's own itabs enter the runtime's table.
+- **The runtime's tables.** `tables.go` writes the same structures as
+  `cmd/link/internal/ld/pcln.go` for the patch alone: `_func`, `ftab`,
+  `findfunctab`, `pctab`, `funcnametab`, `cutab`, inline trees, GC programs, and a
+  `moduledata`. Stack maps, panics, tracebacks and the collector need nothing
+  more. `apply` links the module as `plugin.Open` does (`lastmoduledatap`,
+  `modulesinit`), called by address, so no `go:linkname` is needed.
+- **Replacing.** Each changed top-level function's entry (and those of earlier
+  patches) becomes a jump. Goroutines inside the old code finish it: it is never
+  unmapped. Closures keep their code, since what they captured is laid out as it
+  knows; the next call of the function around them makes new ones. On macOS a page
+  of code cannot be writable and running, so `writeJump` swaps in a changed copy
+  with `mach_vm_remap`, and other threads never see it gone; elsewhere the page is
+  made writable while it stays executable, and an aligned word changes at once.
+  It runs on the main thread, between frames, then `Window.Invalidate`s.
+- **Go releases.** Everything in `hotlink` that knows the toolchain is checked or
+  gated: `SupportedGo`, `objMagic`, and `moduledata`'s offsets against the
+  executable's symbols. A new Go version restarts apps until it is added:
+  update the offsets in `host.go`, `kindSizes` for `abi.Type`, the relocation and
+  symbol kind numbers, `builtins.go` (from `cmd/internal/goobj/builtinlist.go`),
+  `tables.go` against `pcln.go`, then `SupportedGo`. `go test ./internal/hotlink`
+  runs the runtime through collections, stack growth and panics in patched code.
 
 ## Testing
 

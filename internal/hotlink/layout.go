@@ -39,7 +39,8 @@ type linker struct {
 
 	queue []*placed
 
-	thunks map[uint64]uint64 // host functions the patch's tables refer to
+	heapItabs map[[2]uint64]uint64 // what the program said of itabs
+	far       map[uint64]uint64    // addresses beyond the reach of code, and their slots
 }
 
 func (l *linker) align() uint64 {
@@ -172,12 +173,20 @@ func (l *linker) itabAddr(t target) (uint64, bool) {
 	}
 	// One the running program made for a conversion may exist. Code compares
 	// itabs by address, so the patch must use that one.
+	if a, ok := l.heapItabs[[2]uint64{inter, typ}]; ok {
+		return a, a != 0
+	}
+	var a uint64
 	if l.s.QueryItab != nil {
-		if a, err := l.s.QueryItab(inter, typ); err == nil && a != 0 {
-			return a, true
+		if got, err := l.s.QueryItab(inter, typ); err == nil {
+			a = got
 		}
 	}
-	return 0, false
+	l.heapItabs[[2]uint64{inter, typ}] = a
+	if a != 0 {
+		l.far[a] = 0 // too far for code to reach: code loads it from a slot
+	}
+	return a, a != 0
 }
 
 // lookup says where a symbol is: in the patch, or in the program. A symbol
@@ -379,9 +388,16 @@ func (l *linker) lay(fns []target, writes []varWrite) (*hotpatch.Patch, error) {
 		p.addr = ro
 		ro += p.size
 	}
+	// Slots for what code cannot reach.
+	ro = rnd(ro, 8)
+	for a := range l.far {
+		l.far[a] = ro
+		ro += 8
+	}
 	roSymsEnd := ro
 
 	// The tables hold what the writers below compute, sized here.
+
 	tables, err := tb.build(l, base, maxpc, roAt, roSymsEnd)
 	if err != nil {
 		return nil, err
@@ -460,6 +476,9 @@ func (l *linker) lay(fns []target, writes []varWrite) (*hotpatch.Patch, error) {
 				return nil, err
 			}
 		}
+	}
+	for a, slot := range l.far {
+		binary.LittleEndian.PutUint64(rodata[slot-roAt:], a)
 	}
 	// Thunks live after the last function, outside what the function table covers.
 	if err := tb.writeThunks(l, text, base); err != nil {
@@ -666,6 +685,23 @@ func (l *linker) relocate(p *placed, b []byte, textBase, roBase uint64, tb *tabl
 			ins := binary.LittleEndian.Uint32(field)
 			binary.LittleEndian.PutUint32(field, ins&0xfc000000|uint32(d>>2)&0x03ffffff)
 		case rADDRARM64, rARM64PCRELLDST8, rARM64PCRELLDST16, rARM64PCRELLDST32, rARM64PCRELLDST64:
+			if slot, far := l.far[addr]; far && ok {
+				// adrp, add takes the address; adrp, ldr of the same size takes
+				// it from a slot.
+				if r.typ != rADDRARM64 || r.add != 0 {
+					return refuse("%s refers to %s in a way hot reload cannot redirect", p.t.name, "an itab of the program")
+				}
+				t := int64(slot) - int64(pc&^0xfff)
+				o0, o1 := binary.LittleEndian.Uint32(field), binary.LittleEndian.Uint32(field[4:])
+				if o1&0xff800000 != 0x91000000 {
+					return refuse("%s refers to an itab of the program with an unknown instruction", p.t.name)
+				}
+				o0 |= uint32((t>>12)&3)<<29 | uint32((t>>14)&0x7ffff)<<5
+				o1 = 0xf9400000 | o1&0x3ff | uint32((t&0xfff)>>3)<<10
+				binary.LittleEndian.PutUint32(field, o0)
+				binary.LittleEndian.PutUint32(field[4:], o1)
+				continue
+			}
 			t := v - int64(pc&^0xfff)
 			if t >= 1<<32 || t < -(1<<32) {
 				return refuse("a reference from %s reaches too far", p.t.name)
@@ -685,6 +721,15 @@ func (l *linker) relocate(p *placed, b []byte, textBase, roBase uint64, tb *tabl
 			binary.LittleEndian.PutUint32(field, o0)
 			binary.LittleEndian.PutUint32(field[4:], o1)
 		case rCALL, rPCREL:
+			if slot, far := l.far[addr]; far && ok {
+				// lea takes the address; mov of the same size takes it from a slot.
+				if r.typ != rPCREL || r.off < 2 || b[r.off-2] != 0x8d {
+					return refuse("%s refers to an itab of the program with an unknown instruction", p.t.name)
+				}
+				b[r.off-2] = 0x8b
+				binary.LittleEndian.PutUint32(field, uint32(int64(slot)+r.add-int64(pc)-int64(r.siz)))
+				continue
+			}
 			d := v - int64(pc) - int64(r.siz)
 			if d != int64(int32(d)) {
 				return refuse("a reference from %s reaches too far", p.t.name)

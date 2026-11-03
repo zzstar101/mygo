@@ -99,10 +99,12 @@ bun run dev        # a web frontend: runs mygo dev
 go tool mygo dev   # native UI
 ```
 
-`mygo dev` builds a development version of the app and starts it, then
-rebuilds and restarts it when you edit a `.go` file, the configuration, the
-icon or a resource. A build that fails to compile keeps the previous one
-running. Quit the app, or press Ctrl+C, to stop.
+`mygo dev` builds a development version of the app and starts it. When you save
+a `.go` file, [the running app takes the change](hot-reload.md), usually in about
+a tenth of a second, and keeps its windows and everything it holds. A change it
+cannot take that way, as to the fields of a struct, or to the configuration, the
+icon or a resource, rebuilds and restarts it. Code that fails to compile keeps
+the running app as it is. Quit the app, or press Ctrl+C, to stop.
 
 With a web frontend, it also writes `src/mygo.ts` and starts the Vite dev
 server, from which the development app loads its pages: edit `src/main.ts`

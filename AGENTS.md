@@ -54,6 +54,7 @@ wire protocol, TypeScript generation, and the checklist for adding features.
 go build ./... && GOOS=linux go build ./... && GOOS=windows go build ./...  # all must pass
 go vet ./... && GOOS=linux go vet ./... && GOOS=windows go vet ./...
 go vet -tags mygo_noinspector ./...        # production builds, without the inspector of native UI
+go vet -tags mygo_hot .                    # development builds, with hot reload
 GOOS=js GOARCH=wasm go vet $(GOOS=js GOARCH=wasm go list ./... | grep -v /cmd/mygo)  # browsers, all but the CLI
 go test ./...                              # core (fake backend), tsgen, CLI, accelerator
 go build -trimpath -tags mygo_noinspector -ldflags "-s -w -X github.com/egoist/mygo.production=1" -o /tmp/counter-native ./examples/counter-native  # an app's release size, as the benchmarks build it
@@ -62,7 +63,7 @@ bun install && bun run test && bun run typecheck   # the workspace, from the roo
 bun run build                              # build internal/bridge/bridge.js and the npm packages' dist/
 bun run --cwd packages/cli binaries        # cross-compile the CLI into the mygo-cli platform packages
 go run ./cmd/mygo generate examples/todo   # regenerate an example's TypeScript client
-go run ./cmd/mygo dev examples/todo        # live reload (dev bundle in examples/todo/.mygo)
+go run ./cmd/mygo dev examples/todo        # hot reload, else restarts (dev bundle in examples/todo/.mygo)
 go run ./cmd/mygo dev -web examples/counter-native   # native UI in the browser, with live reload
 go run ./cmd/mygo build examples/todo      # .app + .dmg in examples/todo/build
 go run ./cmd/mygo build -platform web examples/counter-native   # a static site in examples/counter-native/dist/web
@@ -145,6 +146,10 @@ Windows GUI tests need Windows with the WebView2 Runtime (a GitHub Actions
   guide); never commit the CLI's binaries.
 - The configuration types of `packages/cli/index.d.ts` (for `mygo.config.ts`)
   mirror `Config` in `cmd/mygo/config.go`; `TestConfigTypes` checks them.
+- Hot reload (`internal/hotlink`, `internal/hotpatch`, `mygo dev`) reads Go's
+  object files and writes the runtime's tables, so a new Go release needs its
+  checklist ("Hot reload" in the architecture guide), and restarts apps until
+  then. It must never reach a build without the tag `mygo_hot`.
 - Tests: unit tests through `internal/fake`; GUI behavior in `internal/e2e`.
 - Tests never pass or fail on wall-clock time ("Waiting in tests" in the
   architecture guide): wait for the condition or event with

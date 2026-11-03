@@ -170,6 +170,8 @@ components, from buttons to tables.
 
 - [Configuration](configuration.md): `mygo.config.ts`, or `mygo.json`.
 - [The mygo CLI](cli.md): its commands and flags.
+- [Hot reload](hot-reload.md): how `mygo dev` changes the running app as you
+  save, and what restarts it.
 - The Go API: `go doc -all github.com/egoist/mygo`, with the documentation
   of every type and method.
 - [Architecture](architecture.md): how MyGo works inside, for contributors,
