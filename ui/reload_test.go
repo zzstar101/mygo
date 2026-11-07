@@ -5,8 +5,10 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"testing"
+	"time"
 )
 
 // reloadView is the view the reload tests drive: a text input the user
@@ -38,7 +40,9 @@ func reloadView(value *string, rows int, extra, keyed bool) func(c *context) {
 // one, is the state of the build before it.
 func reloadTester(view func(c *context), width, height int, blob []byte) *Tester {
 	h := &headless{w: float32(width), h: float32(height), scale: 1}
-	t := &Tester{rt: newRuntime(view, h), h: h}
+	t := &Tester{rt: newRuntime(view, h), h: h, now: time.Now()}
+	t.rt.clock = t.Now
+	h.clock = t.Now
 	t.rt.collect = true
 	t.rt.strict = true
 	t.rt.handleChecks = true
@@ -48,6 +52,30 @@ func reloadTester(view func(c *context), width, height int, blob []byte) *Tester
 	}
 	t.settle()
 	return t
+}
+
+func TestReloadKeepsWheelScroll(t *testing.T) {
+	view := func(c *context) {
+		coreScroll(c).Fill().Children(func() {
+			coreBox(c).Height(1000).Shrink(0)
+		})
+	}
+	tt := reloadTester(view, 200, 200, nil)
+	tt.Move(100, 100)
+	tt.Wheel(100, 100, 0, 100)
+	tt.Advance(time.Second)
+	if y := reloadScrollY(tt); math.Abs(y-100) > 1e-4 {
+		t.Fatalf("wheel settled at %v, want 100", y)
+	}
+	restored := reloadTester(view, 200, 200, tt.rt.reloadSave())
+	if y := reloadScrollY(restored); math.Abs(y-100) > 1e-4 {
+		t.Fatalf("restored wheel scroll at %v, want 100", y)
+	}
+	restored.Wheel(100, 100, 0, 100)
+	restored.Advance(time.Second)
+	if y := reloadScrollY(restored); math.Abs(y-200) > 1e-4 {
+		t.Errorf("wheel after reload settled at %v, want 200", y)
+	}
 }
 
 // reloadScrollY returns how far the view's scroll container is scrolled.

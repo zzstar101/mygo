@@ -164,7 +164,7 @@ func captureReloadWindows() []reloadWindowState {
 		st.Maximized, st.FullScreen = w.native.IsMaximized(), w.native.IsFullScreen()
 		st.Visible = w.native.IsVisible()
 		st.Focused = windows.focused == w
-		if w.content == nil {
+		if !w.content {
 			if u := w.native.URL(); u != "" && u != "about:blank" {
 				st.URL = u
 			}
@@ -371,7 +371,7 @@ func reloadedWindow(w *Window, opts *WindowOptions, st reloadWindowState) {
 		opts.Hidden = true
 		return
 	}
-	if w.content == nil && opts.URL == "" {
+	if !w.content && opts.URL == "" {
 		// Nothing in the window presents a first frame, so nothing would
 		// show it again.
 		return
@@ -389,7 +389,7 @@ func reloadedWindow(w *Window, opts *WindowOptions, st reloadWindowState) {
 		}
 	}
 	w.OnReadyToShow(show)
-	if w.content == nil {
+	if !w.content {
 		// A page that fails to load is never ready to show: the window
 		// shows the failure, as it would have without the reload, rather
 		// than staying hidden with nothing to tell why.

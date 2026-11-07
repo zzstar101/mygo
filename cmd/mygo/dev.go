@@ -418,17 +418,18 @@ func (s *devSession) run(ctx context.Context, c *Config) error {
 			s.setApp(nil)
 			var exit *exec.ExitError
 			if errors.As(err, &exit) && exit.ExitCode() == devRelaunchCode {
-			if s.hot != nil && s.hot.patched {
-				// The build on disk is older than the app that quit.
-				restart = true
-				start()
-				continue
-			}
-			// mygo.App.Relaunch: start the same build again, with the
-			// state it pushed as it quit.
-			if s.reload != nil {
-				s.reload.awaitState(reloadPushTimeout)
-			}
+				// mygo.App.Relaunch: what it pushed as it quit goes to the build
+				// that starts next.
+				if s.reload != nil {
+					s.reload.awaitState(reloadPushTimeout)
+				}
+				if s.hot != nil && s.hot.patched {
+					// The build on disk is older than the app that quit.
+					restart = true
+					start()
+					continue
+				}
+				// Start the same build again.
 				p, err := s.launch(exe)
 				if err != nil {
 					con.println("  " + red(con.sym.fail) + " Relaunching " + s.name)
